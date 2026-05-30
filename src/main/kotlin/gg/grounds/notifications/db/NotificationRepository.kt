@@ -61,7 +61,7 @@ class NotificationRepository(
         }
     }
 
-    fun listForUserInScope(
+    fun listUnreadForUserInScope(
         userId: String,
         scopeType: String,
         scopeId: String,
@@ -76,6 +76,7 @@ class NotificationRepository(
                     JOIN notifications n ON n.id = r.notification_id
                     WHERE r.user_id = ? AND r.archived_at IS NULL
                       AND n.scope_type = ? AND n.scope_id = ?
+                      AND r.read_at IS NULL
                       AND (n.expires_at IS NULL OR n.expires_at > now())
                     ORDER BY n.created_at DESC
                     LIMIT 25

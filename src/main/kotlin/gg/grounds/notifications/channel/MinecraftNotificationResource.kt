@@ -73,7 +73,7 @@ class MinecraftNotificationResource(
             playerUuids.mapNotNull { playerUuid ->
                 val userId = playerResolver.resolveUserId(playerUuid) ?: return@mapNotNull null
                 val notifications =
-                    notificationRepository.listForUserInScope(
+                    notificationRepository.listUnreadForUserInScope(
                         userId = userId,
                         scopeType = scope.type,
                         scopeId = scope.id,
