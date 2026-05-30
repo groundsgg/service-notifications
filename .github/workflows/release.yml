@@ -25,9 +25,16 @@ jobs:
       timestamp: ${{ steps.meta.outputs.timestamp }}
     steps:
       - id: ref
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          VERSION_INPUT: ${{ inputs.version }}
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            version="${{ inputs.version }}"
+          if [ "${EVENT_NAME}" = "workflow_dispatch" ]; then
+            version="${VERSION_INPUT}"
+            if [[ ! "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
+              echo "Invalid release version '${version}'. Expected SemVer, for example 0.1.0." >&2
+              exit 1
+            fi
             ref="service-notifications-v${version}"
           else
             ref="${GITHUB_REF_NAME}"
@@ -74,6 +81,9 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
+            GITHUB_USER=${{ github.actor }}
             BUILD_VERSION=${{ needs.metadata.outputs.version }}
             BUILD_COMMIT=${{ needs.metadata.outputs.commit }}
             BUILD_AT=${{ needs.metadata.outputs.timestamp }}
+          secrets: |
+            github_token=${{ secrets.GITHUB_TOKEN }}
