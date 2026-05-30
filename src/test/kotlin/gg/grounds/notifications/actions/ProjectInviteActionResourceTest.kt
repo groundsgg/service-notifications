@@ -56,6 +56,27 @@ class ProjectInviteActionResourceTest {
 
     @Test
     @TestSecurity(user = "user-alpha")
+    fun projectInviteDeclineStoresSucceededResultWhenForgeAcceptsDeclineAction() {
+        val notificationId =
+            createNotificationWithInvite(
+                inviteId = "invite-decline-success",
+                actionKey = "project_invite.decline",
+            )
+
+        given()
+            .header("X-Request-Id", "request-decline-1")
+            .contentType("application/json")
+            .body("{}")
+            .post("/v1/notifications/$notificationId/actions/project_invite.decline")
+            .then()
+            .statusCode(200)
+            .body("status", equalTo("succeeded"))
+
+        assertActionResultStatus(notificationId, "succeeded")
+    }
+
+    @Test
+    @TestSecurity(user = "user-alpha")
     fun projectInviteAcceptStoresRejectedResultWhenForgeReportsStaleInvite() {
         val notificationId = createNotificationWithInvite("invite-stale")
 
@@ -107,12 +128,15 @@ class ProjectInviteActionResourceTest {
         assertActionResultStatus(notificationId, "failed")
     }
 
-    private fun createNotificationWithInvite(inviteId: String): String {
+    private fun createNotificationWithInvite(
+        inviteId: String,
+        actionKey: String = "project_invite.accept",
+    ): String {
         val token = seedChannelClient()
         return given()
             .header("Authorization", "Bearer $token")
             .contentType("application/json")
-            .body(notificationEventJson(inviteId))
+            .body(notificationEventJson(inviteId, actionKey))
             .post("/v1/notification-events")
             .then()
             .statusCode(201)
@@ -120,7 +144,7 @@ class ProjectInviteActionResourceTest {
             .path("id")
     }
 
-    private fun notificationEventJson(inviteId: String): String =
+    private fun notificationEventJson(inviteId: String, actionKey: String): String =
         """
         {
           "idempotencyKey":"event-$inviteId",
@@ -135,7 +159,7 @@ class ProjectInviteActionResourceTest {
           "data":{"inviteId":"$inviteId"},
           "recipients":[{"userId":"user-alpha"}],
           "actions":[
-            {"actionKey":"project_invite.accept","label":"Accept","style":"primary","command":"project_invite.accept","payload":{"inviteId":"$inviteId"}}
+            {"actionKey":"$actionKey","label":"Action","style":"primary","command":"$actionKey","payload":{"inviteId":"$inviteId"}}
           ]
         }
         """
@@ -199,6 +223,8 @@ class FakeForgeActionServer : QuarkusTestResourceLifecycleManager {
             exchange.requestBody.use { it.readBytes() }
             val status =
                 when {
+                    exchange.requestURI.path.contains("invite-decline-success") &&
+                        exchange.requestURI.path.endsWith("/decline") -> 200
                     exchange.requestURI.path.contains("invite-success") -> 200
                     exchange.requestURI.path.contains("invite-stale") -> 409
                     exchange.requestURI.path.contains("invite-wrong") -> 403
