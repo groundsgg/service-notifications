@@ -58,6 +58,60 @@ class NotificationResourceTest {
     }
 
     @Test
+    fun scopedApiProducerCreatesNotificationsInsideItsScope() {
+        val token =
+            seedChannelClient(
+                channel = "api",
+                scopes = listOf("notifications:write"),
+                projectId = "project-1",
+            )
+
+        given()
+            .header("Authorization", "Bearer $token")
+            .contentType("application/json")
+            .body(
+                notificationEventJson(
+                    idempotencyKey = "event-scoped-create-1",
+                    userId = "user-alpha",
+                    scopeType = "project",
+                    scopeId = "project-1",
+                )
+            )
+            .post("/v1/notification-events")
+            .then()
+            .statusCode(201)
+
+        assertRowCount("notifications", 1)
+    }
+
+    @Test
+    fun scopedApiProducerCannotCreateNotificationsOutsideItsScope() {
+        val token =
+            seedChannelClient(
+                channel = "api",
+                scopes = listOf("notifications:write"),
+                projectId = "project-1",
+            )
+
+        given()
+            .header("Authorization", "Bearer $token")
+            .contentType("application/json")
+            .body(
+                notificationEventJson(
+                    idempotencyKey = "event-scoped-reject-1",
+                    userId = "user-alpha",
+                    scopeType = "project",
+                    scopeId = "project-2",
+                )
+            )
+            .post("/v1/notification-events")
+            .then()
+            .statusCode(403)
+
+        assertRowCount("notifications", 0)
+    }
+
+    @Test
     fun replayingNotificationEventReturnsExistingNotificationWithoutDuplicates() {
         val token = seedChannelClient(channel = "api", scopes = listOf("notifications:write"))
         val body = notificationEventJson(idempotencyKey = "event-replay-1", userId = "user-alpha")
@@ -250,6 +304,38 @@ class NotificationResourceTest {
             .post("/v1/channel/minecraft/notifications/batch")
             .then()
             .statusCode(400)
+    }
+
+    @Test
+    fun minecraftBatchLimitsNotificationsPerMappedPlayer() {
+        val apiToken = seedChannelClient(channel = "api", scopes = listOf("notifications:write"))
+        val minecraftToken =
+            seedChannelClient(
+                channel = "minecraft",
+                scopes = listOf("minecraft.notifications.read"),
+                serverId = "server-1",
+            )
+        val playerUuid = UUID.randomUUID().toString()
+        playerResolver.mapPlayer(playerUuid, "user-alpha")
+        repeat(30) { index ->
+            postNotificationEvent(
+                apiToken,
+                "event-minecraft-limit-$index",
+                "user-alpha",
+                scopeType = "server",
+                scopeId = "server-1",
+            )
+        }
+
+        given()
+            .header("Authorization", "Bearer $minecraftToken")
+            .contentType("application/json")
+            .body("""{"serverId":"server-1","playerUuids":["$playerUuid"]}""")
+            .post("/v1/channel/minecraft/notifications/batch")
+            .then()
+            .statusCode(200)
+            .body("players.size()", equalTo(1))
+            .body("players[0].notifications.size()", equalTo(25))
     }
 
     private fun postNotificationEvent(

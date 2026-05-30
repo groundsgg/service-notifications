@@ -78,6 +78,7 @@ class NotificationRepository(
                       AND n.scope_type = ? AND n.scope_id = ?
                       AND (n.expires_at IS NULL OR n.expires_at > now())
                     ORDER BY n.created_at DESC
+                    LIMIT 25
                     """
                         .trimIndent()
                 )

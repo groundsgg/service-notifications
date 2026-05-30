@@ -7,11 +7,13 @@ import gg.grounds.notifications.core.ActionExecutionResponse
 import gg.grounds.notifications.core.NotificationEventRequest
 import gg.grounds.notifications.core.NotificationEventResponse
 import gg.grounds.notifications.core.NotificationInboxResponse
+import gg.grounds.notifications.db.ChannelClient
 import gg.grounds.notifications.db.NotificationRepository
 import io.quarkus.security.Authenticated
 import io.quarkus.security.identity.SecurityIdentity
 import jakarta.ws.rs.BadRequestException
 import jakarta.ws.rs.Consumes
+import jakarta.ws.rs.ForbiddenException
 import jakarta.ws.rs.GET
 import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
@@ -40,11 +42,13 @@ class NotificationResource(
         request: NotificationEventRequest,
         @Context headers: HttpHeaders,
     ): Response {
-        channelClientAuthService.requireClient(
-            headers,
-            channel = "api",
-            requiredScope = "notifications:write",
-        )
+        val client =
+            channelClientAuthService.requireClient(
+                headers,
+                channel = "api",
+                requiredScope = "notifications:write",
+            )
+        requireProducerScope(client, request)
         val response = notificationRepository.createEvent(request)
         val status = if (response.created) Response.Status.CREATED else Response.Status.OK
         return Response.status(status)
@@ -79,6 +83,30 @@ class NotificationResource(
     private fun rejectUserIdQuery(uriInfo: UriInfo) {
         if (uriInfo.queryParameters.containsKey("userId")) {
             throw BadRequestException("userId query parameter is not accepted")
+        }
+    }
+
+    private fun requireProducerScope(client: ChannelClient, request: NotificationEventRequest) {
+        client.deploymentId?.let { deploymentId ->
+            requireScope("deployment", deploymentId, request)
+            return
+        }
+        client.serverId?.let { serverId ->
+            requireScope("server", serverId, request)
+            return
+        }
+        client.projectId?.let { projectId -> requireScope("project", projectId, request) }
+        // Unscoped API producers are intentionally global producers for bootstrap and system
+        // emitters.
+    }
+
+    private fun requireScope(
+        expectedType: String,
+        expectedId: String,
+        request: NotificationEventRequest,
+    ) {
+        if (request.scope.type != expectedType || request.scope.id != expectedId) {
+            throw ForbiddenException("Channel client is not authorized for notification scope")
         }
     }
 }
