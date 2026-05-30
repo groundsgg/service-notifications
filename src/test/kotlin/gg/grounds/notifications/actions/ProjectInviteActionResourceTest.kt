@@ -56,6 +56,27 @@ class ProjectInviteActionResourceTest {
 
     @Test
     @TestSecurity(user = "user-alpha")
+    fun repeatedProjectInviteAcceptReturnsExistingResultWithoutCallingForgeAgain() {
+        val notificationId = createNotificationWithInvite("invite-idempotent")
+
+        repeat(2) {
+            given()
+                .header("X-Request-Id", "request-idempotent-$it")
+                .contentType("application/json")
+                .body("{}")
+                .post("/v1/notifications/$notificationId/actions/project_invite.accept")
+                .then()
+                .statusCode(200)
+                .body("status", equalTo("succeeded"))
+        }
+
+        assertActionResultStatus(notificationId, "succeeded")
+        assertActionResultCount(notificationId, 1)
+        assertEquals(1, FakeForgeActionServer.requestCount("invite-idempotent", "accept"))
+    }
+
+    @Test
+    @TestSecurity(user = "user-alpha")
     fun projectInviteDeclineStoresSucceededResultWhenForgeAcceptsDeclineAction() {
         val notificationId =
             createNotificationWithInvite(
@@ -126,6 +147,25 @@ class ProjectInviteActionResourceTest {
             .body("status", equalTo("failed"))
 
         assertActionResultStatus(notificationId, "failed")
+    }
+
+    private fun assertActionResultCount(notificationId: String, expectedCount: Int) {
+        dataSource.connection.use { connection ->
+            connection
+                .prepareStatement(
+                    "SELECT count(*) FROM notification_action_results WHERE notification_id = ?"
+                )
+                .use { statement ->
+                    statement.setObject(1, UUID.fromString(notificationId))
+                    val resultSet = statement.executeQuery()
+                    try {
+                        resultSet.next()
+                        assertEquals(expectedCount, resultSet.getInt(1))
+                    } finally {
+                        resultSet.close()
+                    }
+                }
+        }
     }
 
     private fun createNotificationWithInvite(
@@ -218,14 +258,26 @@ class FakeForgeActionServer : QuarkusTestResourceLifecycleManager {
     private lateinit var server: HttpServer
 
     override fun start(): Map<String, String> {
+        requests.clear()
         server = HttpServer.create(InetSocketAddress("localhost", 0), 0)
         server.createContext("/") { exchange ->
             exchange.requestBody.use { it.readBytes() }
+            val authorization = exchange.requestHeaders.getFirst("Authorization")
+            if (authorization != "Bearer test-forge-internal-token") {
+                exchange.sendResponseHeaders(401, -1)
+                exchange.close()
+                return@createContext
+            }
+            val inviteId =
+                exchange.requestURI.path.substringAfter("project-invites/").substringBefore('/')
+            val action = exchange.requestURI.path.substringAfterLast('/')
+            requests.merge("$inviteId:$action", 1, Int::plus)
             val status =
                 when {
                     exchange.requestURI.path.contains("invite-decline-success") &&
                         exchange.requestURI.path.endsWith("/decline") -> 200
                     exchange.requestURI.path.contains("invite-success") -> 200
+                    exchange.requestURI.path.contains("invite-idempotent") -> 200
                     exchange.requestURI.path.contains("invite-stale") -> 409
                     exchange.requestURI.path.contains("invite-wrong") -> 403
                     else -> 500
@@ -239,5 +291,11 @@ class FakeForgeActionServer : QuarkusTestResourceLifecycleManager {
 
     override fun stop() {
         server.stop(0)
+    }
+
+    companion object {
+        private val requests = java.util.concurrent.ConcurrentHashMap<String, Int>()
+
+        fun requestCount(inviteId: String, action: String): Int = requests["$inviteId:$action"] ?: 0
     }
 }

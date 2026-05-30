@@ -54,6 +54,7 @@ class NotificationResourceTest {
 
         assertRowCount("notifications", 1)
         assertRowCount("notification_recipients", 1)
+        assertWorkflowStatus("open")
     }
 
     @Test
@@ -83,6 +84,41 @@ class NotificationResourceTest {
 
         assertRowCount("notifications", 1)
         assertRowCount("notification_recipients", 1)
+    }
+
+    @Test
+    fun replayingNotificationEventHandlesDatabaseIdempotencyConflict() {
+        val token = seedChannelClient(channel = "api", scopes = listOf("notifications:write"))
+        val existingId = UUID.randomUUID()
+        dataSource.connection.use { connection ->
+            connection
+                .prepareStatement(
+                    """
+                    INSERT INTO notifications
+                      (id, idempotency_key, type, category, priority, scope_type,
+                       actor_type, title, body)
+                    VALUES (?, 'event-conflict-1', 'project_invite', 'project', 'normal',
+                            'project', 'system', 'Existing invite', 'Existing body')
+                    """
+                        .trimIndent()
+                )
+                .use { statement ->
+                    statement.setObject(1, existingId)
+                    statement.executeUpdate()
+                }
+        }
+
+        given()
+            .header("Authorization", "Bearer $token")
+            .contentType("application/json")
+            .body(notificationEventJson(idempotencyKey = "event-conflict-1", userId = "user-alpha"))
+            .post("/v1/notification-events")
+            .then()
+            .statusCode(200)
+            .body("id", equalTo(existingId.toString()))
+
+        assertRowCount("notifications", 1)
+        assertRowCount("notification_recipients", 0)
     }
 
     @Test
@@ -122,17 +158,40 @@ class NotificationResourceTest {
     fun minecraftBatchRequiresValidChannelTokenAndReturnsMappedPlayerNotifications() {
         val apiToken = seedChannelClient(channel = "api", scopes = listOf("notifications:write"))
         val minecraftToken =
-            seedChannelClient(channel = "minecraft", scopes = listOf("notifications:read"))
+            seedChannelClient(
+                channel = "minecraft",
+                scopes = listOf("minecraft.notifications.read"),
+                serverId = "server-1",
+            )
         val mappedPlayerUuid = UUID.randomUUID().toString()
         val unmappedPlayerUuid = UUID.randomUUID().toString()
         playerResolver.mapPlayer(mappedPlayerUuid, "user-alpha")
-        postNotificationEvent(apiToken, "event-minecraft-visible-1", "user-alpha")
-        postNotificationEvent(apiToken, "event-minecraft-hidden-1", "user-beta")
+        postNotificationEvent(
+            apiToken,
+            "event-minecraft-visible-1",
+            "user-alpha",
+            scopeType = "server",
+            scopeId = "server-1",
+        )
+        postNotificationEvent(
+            apiToken,
+            "event-minecraft-hidden-scope-1",
+            "user-alpha",
+            scopeType = "server",
+            scopeId = "server-2",
+        )
+        postNotificationEvent(
+            apiToken,
+            "event-minecraft-hidden-user-1",
+            "user-beta",
+            scopeType = "server",
+            scopeId = "server-1",
+        )
 
         given()
             .header("Authorization", "Bearer invalid-token")
             .contentType("application/json")
-            .body("""{"playerUuids":["$mappedPlayerUuid"]}""")
+            .body("""{"serverId":"server-1","playerUuids":["$mappedPlayerUuid"]}""")
             .`when`()
             .post("/v1/channel/minecraft/notifications/batch")
             .then()
@@ -141,7 +200,9 @@ class NotificationResourceTest {
         given()
             .header("Authorization", "Bearer $minecraftToken")
             .contentType("application/json")
-            .body("""{"playerUuids":["$mappedPlayerUuid","$unmappedPlayerUuid"]}""")
+            .body(
+                """{"serverId":"server-1","playerUuids":["$mappedPlayerUuid","$mappedPlayerUuid","$unmappedPlayerUuid"]}"""
+            )
             .`when`()
             .post("/v1/channel/minecraft/notifications/batch")
             .then()
@@ -152,29 +213,75 @@ class NotificationResourceTest {
             .body("players[0].notifications[0].recipientUserId", equalTo("user-alpha"))
     }
 
+    @Test
+    fun minecraftBatchRejectsRequestsOutsideChannelClientScope() {
+        val minecraftToken =
+            seedChannelClient(
+                channel = "minecraft",
+                scopes = listOf("minecraft.notifications.read"),
+                serverId = "server-1",
+            )
+        val playerUuid = UUID.randomUUID().toString()
+        playerResolver.mapPlayer(playerUuid, "user-alpha")
+
+        given()
+            .header("Authorization", "Bearer $minecraftToken")
+            .contentType("application/json")
+            .body("""{"serverId":"server-2","playerUuids":["$playerUuid"]}""")
+            .post("/v1/channel/minecraft/notifications/batch")
+            .then()
+            .statusCode(403)
+    }
+
+    @Test
+    fun minecraftBatchRejectsTooManyPlayers() {
+        val minecraftToken =
+            seedChannelClient(
+                channel = "minecraft",
+                scopes = listOf("minecraft.notifications.read"),
+                serverId = "server-1",
+            )
+        val playerUuids = (1..101).joinToString(",") { "\"${UUID.randomUUID()}\"" }
+
+        given()
+            .header("Authorization", "Bearer $minecraftToken")
+            .contentType("application/json")
+            .body("""{"serverId":"server-1","playerUuids":[$playerUuids]}""")
+            .post("/v1/channel/minecraft/notifications/batch")
+            .then()
+            .statusCode(400)
+    }
+
     private fun postNotificationEvent(
         token: String,
         idempotencyKey: String,
         userId: String,
+        scopeType: String = "project",
+        scopeId: String = "project-1",
     ): String =
         given()
             .header("Authorization", "Bearer $token")
             .contentType("application/json")
-            .body(notificationEventJson(idempotencyKey, userId))
+            .body(notificationEventJson(idempotencyKey, userId, scopeType, scopeId))
             .post("/v1/notification-events")
             .then()
             .statusCode(201)
             .extract()
             .path("id")
 
-    private fun notificationEventJson(idempotencyKey: String, userId: String): String =
+    private fun notificationEventJson(
+        idempotencyKey: String,
+        userId: String,
+        scopeType: String = "project",
+        scopeId: String = "project-1",
+    ): String =
         """
         {
           "idempotencyKey":"$idempotencyKey",
           "type":"project_invite",
           "category":"project",
           "priority":"normal",
-          "scope":{"type":"project","id":"project-1"},
+          "scope":{"type":"$scopeType","id":"$scopeId"},
           "actor":{"type":"user","id":"user-owner"},
           "entity":{"type":"project_invite","id":"invite-1"},
           "title":"Project invite",
@@ -189,15 +296,22 @@ class NotificationResourceTest {
         """
             .trimIndent()
 
-    private fun seedChannelClient(channel: String, scopes: List<String>): String {
+    private fun seedChannelClient(
+        channel: String,
+        scopes: List<String>,
+        projectId: String? = null,
+        serverId: String? = null,
+        deploymentId: String? = null,
+    ): String {
         val token = "test-${UUID.randomUUID()}"
         val tokenHash = hashToken(token)
         dataSource.connection.use { connection ->
             connection
                 .prepareStatement(
                     """
-                    INSERT INTO notification_channel_clients (id, channel, token_hash, scopes)
-                    VALUES (?, ?, ?, ?)
+                    INSERT INTO notification_channel_clients
+                      (id, channel, token_hash, project_id, server_id, deployment_id, scopes)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
                     """
                         .trimIndent()
                 )
@@ -205,7 +319,10 @@ class NotificationResourceTest {
                     statement.setObject(1, UUID.randomUUID())
                     statement.setString(2, channel)
                     statement.setString(3, tokenHash)
-                    statement.setArray(4, connection.createArrayOf("text", scopes.toTypedArray()))
+                    statement.setString(4, projectId)
+                    statement.setString(5, serverId)
+                    statement.setString(6, deploymentId)
+                    statement.setArray(7, connection.createArrayOf("text", scopes.toTypedArray()))
                     statement.executeUpdate()
                 }
         }
@@ -224,6 +341,21 @@ class NotificationResourceTest {
                 try {
                     resultSet.next()
                     assertEquals(expected, resultSet.getInt(1))
+                } finally {
+                    resultSet.close()
+                }
+            }
+        }
+    }
+
+    private fun assertWorkflowStatus(expected: String) {
+        dataSource.connection.use { connection ->
+            connection.createStatement().use { statement ->
+                val resultSet =
+                    statement.executeQuery("SELECT status FROM notification_workflow_state")
+                try {
+                    resultSet.next()
+                    assertEquals(expected, resultSet.getString("status"))
                 } finally {
                     resultSet.close()
                 }

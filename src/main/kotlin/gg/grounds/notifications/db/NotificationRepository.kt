@@ -2,14 +2,19 @@ package gg.grounds.notifications.db
 
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
+import gg.grounds.notifications.core.ActionExecutionResponse
 import gg.grounds.notifications.core.NotificationActionItem
 import gg.grounds.notifications.core.NotificationEventRequest
 import gg.grounds.notifications.core.NotificationEventResponse
 import gg.grounds.notifications.core.NotificationInboxItem
 import gg.grounds.notifications.core.StoredNotificationAction
 import jakarta.enterprise.context.ApplicationScoped
+import jakarta.ws.rs.ForbiddenException
+import jakarta.ws.rs.NotFoundException
 import java.sql.Connection
 import java.sql.PreparedStatement
+import java.sql.ResultSet
+import java.sql.SQLException
 import java.sql.Types
 import java.time.OffsetDateTime
 import java.util.UUID
@@ -27,16 +32,18 @@ class NotificationRepository(
         dataSource.connection.use { connection ->
             connection.autoCommit = false
             try {
-                findNotificationIdByIdempotencyKey(connection, request.idempotencyKey)?.let {
-                    existingId ->
+                val notificationId = UUID.randomUUID()
+                if (!insertNotification(connection, notificationId, request)) {
+                    val existingId =
+                        findNotificationIdByIdempotencyKey(connection, request.idempotencyKey)
+                            ?: throw IllegalStateException(
+                                "Conflicting notification was not readable"
+                            )
                     connection.commit()
                     return NotificationEventResponse(existingId, created = false)
                 }
-
-                val notificationId = UUID.randomUUID()
-                insertNotification(connection, notificationId, request)
-                val audienceIds = insertAudiences(connection, notificationId, request)
-                insertRecipients(connection, notificationId, request, audienceIds.firstOrNull())
+                val audienceIdsByUserId = insertAudiences(connection, notificationId, request)
+                insertRecipients(connection, notificationId, request, audienceIdsByUserId)
                 insertActions(connection, notificationId, request)
                 insertWorkflowState(connection, notificationId)
                 insertOutboxEvent(connection, notificationId, request)
@@ -53,6 +60,34 @@ class NotificationRepository(
             }
         }
     }
+
+    fun listForUserInScope(
+        userId: String,
+        scopeType: String,
+        scopeId: String,
+    ): List<NotificationInboxItem> =
+        dataSource.connection.use { connection ->
+            connection
+                .prepareStatement(
+                    """
+                    SELECT n.id, r.id AS recipient_id, r.user_id, n.type, n.category, n.priority,
+                           n.title, n.body, n.data::text, n.created_at, r.read_at
+                    FROM notification_recipients r
+                    JOIN notifications n ON n.id = r.notification_id
+                    WHERE r.user_id = ? AND r.archived_at IS NULL
+                      AND n.scope_type = ? AND n.scope_id = ?
+                      AND (n.expires_at IS NULL OR n.expires_at > now())
+                    ORDER BY n.created_at DESC
+                    """
+                        .trimIndent()
+                )
+                .use { statement ->
+                    statement.setString(1, userId)
+                    statement.setString(2, scopeType)
+                    statement.setString(3, scopeId)
+                    readInboxItems(connection, statement)
+                }
+        }
 
     fun listForUser(userId: String): List<NotificationInboxItem> =
         dataSource.connection.use { connection ->
@@ -71,37 +106,7 @@ class NotificationRepository(
                 )
                 .use { statement ->
                     statement.setString(1, userId)
-                    val items = mutableListOf<NotificationInboxItem>()
-                    val resultSet = statement.executeQuery()
-                    try {
-                        while (resultSet.next()) {
-                            val notificationId = resultSet.getObject("id", UUID::class.java)
-                            items +=
-                                NotificationInboxItem(
-                                    id = notificationId,
-                                    recipientId =
-                                        resultSet.getObject("recipient_id", UUID::class.java),
-                                    recipientUserId = resultSet.getString("user_id"),
-                                    type = resultSet.getString("type"),
-                                    category = resultSet.getString("category"),
-                                    priority = resultSet.getString("priority"),
-                                    title = resultSet.getString("title"),
-                                    body = resultSet.getString("body"),
-                                    data = objectMapper.readTree(resultSet.getString("data")),
-                                    createdAt =
-                                        resultSet.getObject(
-                                            "created_at",
-                                            OffsetDateTime::class.java,
-                                        ),
-                                    readAt =
-                                        resultSet.getObject("read_at", OffsetDateTime::class.java),
-                                    actions = listActions(connection, notificationId),
-                                )
-                        }
-                    } finally {
-                        resultSet.close()
-                    }
-                    items
+                    readInboxItems(connection, statement)
                 }
         }
 
@@ -184,6 +189,79 @@ class NotificationRepository(
         }
     }
 
+    fun executeActionOnce(
+        notificationId: UUID,
+        actionKey: String,
+        userId: String,
+        execute: (StoredNotificationAction) -> ActionExecutionResponse,
+    ): ActionExecutionResponse {
+        dataSource.connection.use { connection ->
+            connection.autoCommit = false
+            try {
+                if (!recipientExists(connection, notificationId, userId)) {
+                    throw ForbiddenException("Authenticated user is not a notification recipient")
+                }
+                val action =
+                    findActionForUpdate(connection, notificationId, actionKey)
+                        ?: throw NotFoundException("Notification action was not found")
+                findActionResult(connection, action.id, userId)?.let { existingResult ->
+                    connection.commit()
+                    return existingResult
+                }
+                val result = execute(action)
+                insertActionResult(connection, action, userId, result.status, result.reason)
+                connection.commit()
+                return result
+            } catch (exception: SQLException) {
+                connection.rollback()
+                if (exception.sqlState == UNIQUE_VIOLATION) {
+                    return findStoredActionResult(notificationId, actionKey, userId)
+                        ?: throw exception
+                }
+                throw exception
+            } catch (exception: Exception) {
+                connection.rollback()
+                throw exception
+            }
+        }
+    }
+
+    private fun findStoredActionResult(
+        notificationId: UUID,
+        actionKey: String,
+        userId: String,
+    ): ActionExecutionResponse? =
+        dataSource.connection.use { connection ->
+            connection
+                .prepareStatement(
+                    """
+                    SELECT ar.status, ar.reason
+                    FROM notification_action_results ar
+                    JOIN notification_actions a ON a.id = ar.action_id
+                    WHERE ar.notification_id = ? AND a.action_key = ? AND ar.user_id = ?
+                    """
+                        .trimIndent()
+                )
+                .use { statement ->
+                    statement.setObject(1, notificationId)
+                    statement.setString(2, actionKey)
+                    statement.setString(3, userId)
+                    val resultSet = statement.executeQuery()
+                    try {
+                        if (resultSet.next()) {
+                            ActionExecutionResponse(
+                                resultSet.getString("status"),
+                                resultSet.getString("reason"),
+                            )
+                        } else {
+                            null
+                        }
+                    } finally {
+                        resultSet.close()
+                    }
+                }
+        }
+
     private fun findNotificationIdByIdempotencyKey(
         connection: Connection,
         idempotencyKey: String,
@@ -203,7 +281,7 @@ class NotificationRepository(
         connection: Connection,
         notificationId: UUID,
         request: NotificationEventRequest,
-    ) {
+    ): Boolean =
         connection
             .prepareStatement(
                 """
@@ -211,6 +289,7 @@ class NotificationRepository(
                   (id, idempotency_key, type, category, priority, scope_type, scope_id,
                    actor_type, actor_id, entity_type, entity_id, title, body, data)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (idempotency_key) DO NOTHING
                 """
                     .trimIndent()
             )
@@ -229,16 +308,15 @@ class NotificationRepository(
                 statement.setString(12, request.title)
                 statement.setString(13, request.body)
                 statement.setJson(14, request.data ?: objectMapper.createObjectNode())
-                statement.executeUpdate()
+                statement.executeUpdate() == 1
             }
-    }
 
     private fun insertAudiences(
         connection: Connection,
         notificationId: UUID,
         request: NotificationEventRequest,
-    ): List<UUID> =
-        request.recipients.map { recipient ->
+    ): Map<String, UUID> =
+        request.recipients.associate { recipient ->
             val audienceId = UUID.randomUUID()
             connection
                 .prepareStatement(
@@ -254,14 +332,14 @@ class NotificationRepository(
                     statement.setString(3, recipient.userId)
                     statement.executeUpdate()
                 }
-            audienceId
+            recipient.userId to audienceId
         }
 
     private fun insertRecipients(
         connection: Connection,
         notificationId: UUID,
         request: NotificationEventRequest,
-        fallbackAudienceId: UUID?,
+        audienceIdsByUserId: Map<String, UUID>,
     ) {
         request.recipients.forEach { recipient ->
             connection
@@ -278,7 +356,7 @@ class NotificationRepository(
                     statement.setObject(1, UUID.randomUUID())
                     statement.setObject(2, notificationId)
                     statement.setString(3, recipient.userId)
-                    statement.setObject(4, fallbackAudienceId)
+                    statement.setObject(4, audienceIdsByUserId[recipient.userId])
                     statement.executeUpdate()
                 }
         }
@@ -316,7 +394,7 @@ class NotificationRepository(
     private fun insertWorkflowState(connection: Connection, notificationId: UUID) {
         connection
             .prepareStatement(
-                "INSERT INTO notification_workflow_state (notification_id, status) VALUES (?, 'pending')"
+                "INSERT INTO notification_workflow_state (notification_id, status) VALUES (?, 'open')"
             )
             .use { statement ->
                 statement.setObject(1, notificationId)
@@ -383,11 +461,159 @@ class NotificationRepository(
                 actions
             }
 
+    private fun readInboxItems(
+        connection: Connection,
+        statement: PreparedStatement,
+    ): List<NotificationInboxItem> {
+        val items = mutableListOf<NotificationInboxItem>()
+        val resultSet = statement.executeQuery()
+        try {
+            while (resultSet.next()) {
+                val notificationId = resultSet.getObject("id", UUID::class.java)
+                items +=
+                    NotificationInboxItem(
+                        id = notificationId,
+                        recipientId = resultSet.getObject("recipient_id", UUID::class.java),
+                        recipientUserId = resultSet.getString("user_id"),
+                        type = resultSet.getString("type"),
+                        category = resultSet.getString("category"),
+                        priority = resultSet.getString("priority"),
+                        title = resultSet.getString("title"),
+                        body = resultSet.getString("body"),
+                        data = objectMapper.readTree(resultSet.getString("data")),
+                        createdAt = resultSet.getObject("created_at", OffsetDateTime::class.java),
+                        readAt = resultSet.getObject("read_at", OffsetDateTime::class.java),
+                        actions = listActions(connection, notificationId),
+                    )
+            }
+        } finally {
+            resultSet.close()
+        }
+        return items
+    }
+
+    private fun recipientExists(
+        connection: Connection,
+        notificationId: UUID,
+        userId: String,
+    ): Boolean =
+        connection
+            .prepareStatement(
+                "SELECT 1 FROM notification_recipients WHERE notification_id = ? AND user_id = ?"
+            )
+            .use { statement ->
+                statement.setObject(1, notificationId)
+                statement.setString(2, userId)
+                val resultSet = statement.executeQuery()
+                try {
+                    resultSet.next()
+                } finally {
+                    resultSet.close()
+                }
+            }
+
+    private fun findActionForUpdate(
+        connection: Connection,
+        notificationId: UUID,
+        actionKey: String,
+    ): StoredNotificationAction? =
+        connection
+            .prepareStatement(
+                """
+                SELECT id, notification_id, action_key, command, payload::text
+                FROM notification_actions
+                WHERE notification_id = ? AND action_key = ?
+                FOR UPDATE
+                """
+                    .trimIndent()
+            )
+            .use { statement ->
+                statement.setObject(1, notificationId)
+                statement.setString(2, actionKey)
+                val resultSet = statement.executeQuery()
+                try {
+                    if (resultSet.next()) readStoredAction(resultSet) else null
+                } finally {
+                    resultSet.close()
+                }
+            }
+
+    private fun findActionResult(
+        connection: Connection,
+        actionId: UUID,
+        userId: String,
+    ): ActionExecutionResponse? =
+        connection
+            .prepareStatement(
+                """
+                SELECT status, reason
+                FROM notification_action_results
+                WHERE action_id = ? AND user_id = ?
+                ORDER BY created_at ASC
+                LIMIT 1
+                """
+                    .trimIndent()
+            )
+            .use { statement ->
+                statement.setObject(1, actionId)
+                statement.setString(2, userId)
+                val resultSet = statement.executeQuery()
+                try {
+                    if (resultSet.next()) {
+                        ActionExecutionResponse(
+                            resultSet.getString("status"),
+                            resultSet.getString("reason"),
+                        )
+                    } else {
+                        null
+                    }
+                } finally {
+                    resultSet.close()
+                }
+            }
+
+    private fun insertActionResult(
+        connection: Connection,
+        action: StoredNotificationAction,
+        userId: String,
+        status: String,
+        reason: String?,
+    ) {
+        connection
+            .prepareStatement(
+                """
+                INSERT INTO notification_action_results
+                  (id, notification_id, action_id, user_id, status, reason)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """
+                    .trimIndent()
+            )
+            .use { statement ->
+                statement.setObject(1, UUID.randomUUID())
+                statement.setObject(2, action.notificationId)
+                statement.setObject(3, action.id)
+                statement.setString(4, userId)
+                statement.setString(5, status)
+                statement.setString(6, reason)
+                statement.executeUpdate()
+            }
+    }
+
+    private fun readStoredAction(resultSet: ResultSet): StoredNotificationAction =
+        StoredNotificationAction(
+            id = resultSet.getObject("id", UUID::class.java),
+            notificationId = resultSet.getObject("notification_id", UUID::class.java),
+            actionKey = resultSet.getString("action_key"),
+            command = resultSet.getString("command"),
+            payload = objectMapper.readTree(resultSet.getString("payload")),
+        )
+
     private fun PreparedStatement.setJson(index: Int, value: JsonNode) {
         setObject(index, objectMapper.writeValueAsString(value), Types.OTHER)
     }
 
     companion object {
         private val LOG: Logger = Logger.getLogger(NotificationRepository::class.java)
+        private const val UNIQUE_VIOLATION = "23505"
     }
 }

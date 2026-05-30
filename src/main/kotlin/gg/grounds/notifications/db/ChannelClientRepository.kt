@@ -4,7 +4,14 @@ import jakarta.enterprise.context.ApplicationScoped
 import java.util.UUID
 import javax.sql.DataSource
 
-data class ChannelClient(val id: UUID, val channel: String, val scopes: Set<String>)
+data class ChannelClient(
+    val id: UUID,
+    val channel: String,
+    val scopes: Set<String>,
+    val projectId: String?,
+    val serverId: String?,
+    val deploymentId: String?,
+)
 
 @ApplicationScoped
 class ChannelClientRepository(private val dataSource: DataSource) {
@@ -13,7 +20,7 @@ class ChannelClientRepository(private val dataSource: DataSource) {
             connection
                 .prepareStatement(
                     """
-                    SELECT id, channel, scopes
+                    SELECT id, channel, project_id, server_id, deployment_id, scopes
                     FROM notification_channel_clients
                     WHERE token_hash = ? AND revoked_at IS NULL
                     """
@@ -31,6 +38,9 @@ class ChannelClientRepository(private val dataSource: DataSource) {
                             id = resultSet.getObject("id", UUID::class.java),
                             channel = resultSet.getString("channel"),
                             scopes = scopes.filterIsInstance<String>().toSet(),
+                            projectId = resultSet.getString("project_id"),
+                            serverId = resultSet.getString("server_id"),
+                            deploymentId = resultSet.getString("deployment_id"),
                         )
                     } finally {
                         resultSet.close()
