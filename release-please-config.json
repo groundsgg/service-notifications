@@ -1,0 +1,9 @@
+{
+  "packages": {
+    ".": {
+      "release-type": "simple",
+      "package-name": "service-notifications",
+      "include-v-in-tag": true
+    }
+  }
+}
