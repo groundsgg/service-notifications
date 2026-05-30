@@ -1,25 +1,37 @@
 package gg.grounds.notifications.channel
 
+import gg.grounds.notifications.actions.NotificationActionService
 import gg.grounds.notifications.auth.ChannelClientAuthService
+import gg.grounds.notifications.core.ActionExecutionResponse
 import gg.grounds.notifications.core.NotificationInboxItem
 import gg.grounds.notifications.db.ChannelClient
 import gg.grounds.notifications.db.NotificationRepository
 import jakarta.ws.rs.BadRequestException
 import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.ForbiddenException
+import jakarta.ws.rs.NotFoundException
 import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
+import jakarta.ws.rs.PathParam
 import jakarta.ws.rs.Produces
 import jakarta.ws.rs.core.Context
 import jakarta.ws.rs.core.HttpHeaders
 import jakarta.ws.rs.core.MediaType
+import java.util.UUID
 
 data class MinecraftNotificationBatchRequest(
-    val serverId: String?,
-    val deploymentId: String? = null,
-    val projectId: String? = null,
+    override val serverId: String?,
+    override val deploymentId: String? = null,
+    override val projectId: String? = null,
     val playerUuids: List<String>,
-)
+) : MinecraftNotificationScopeRequest
+
+data class MinecraftNotificationActionRequest(
+    val playerUuid: String?,
+    override val serverId: String?,
+    override val deploymentId: String? = null,
+    override val projectId: String? = null,
+) : MinecraftNotificationScopeRequest
 
 data class MinecraftNotificationBatchResponse(val players: List<MinecraftPlayerNotifications>)
 
@@ -35,6 +47,7 @@ class MinecraftNotificationResource(
     private val authService: ChannelClientAuthService,
     private val playerResolver: MinecraftPlayerResolver,
     private val notificationRepository: NotificationRepository,
+    private val actionService: NotificationActionService,
 ) {
     @POST
     @Path("/notifications/batch")
@@ -73,9 +86,47 @@ class MinecraftNotificationResource(
         return MinecraftNotificationBatchResponse(players)
     }
 
+    @POST
+    @Path("/notifications/{notificationId}/actions/{actionKey}")
+    fun executeAction(
+        @PathParam("notificationId") notificationId: UUID,
+        @PathParam("actionKey") actionKey: String,
+        request: MinecraftNotificationActionRequest,
+        @Context headers: HttpHeaders,
+    ): ActionExecutionResponse {
+        if (request.serverId.isNullOrBlank()) {
+            throw BadRequestException("serverId is required")
+        }
+        val playerUuid =
+            request.playerUuid?.takeIf { it.isNotBlank() }
+                ?: throw BadRequestException("playerUuid is required")
+        val client =
+            authService.requireClient(
+                headers,
+                channel = "minecraft",
+                requiredScope = MINECRAFT_ACTION_SCOPE,
+            )
+        val scope = authorizedScope(client, request)
+        val userId =
+            playerResolver.resolveUserId(playerUuid)
+                ?: throw NotFoundException("Minecraft player was not mapped")
+        if (
+            !notificationRepository.recipientExistsInScope(
+                notificationId = notificationId,
+                userId = userId,
+                scopeType = scope.type,
+                scopeId = scope.id,
+            )
+        ) {
+            throw ForbiddenException("Channel client is not authorized for notification scope")
+        }
+        val requestId = headers.getHeaderString("X-Request-Id") ?: UUID.randomUUID().toString()
+        return actionService.execute(notificationId, actionKey, userId, requestId)
+    }
+
     private fun authorizedScope(
         client: ChannelClient,
-        request: MinecraftNotificationBatchRequest,
+        request: MinecraftNotificationScopeRequest,
     ): NotificationScopeFilter {
         client.deploymentId?.let { deploymentId ->
             if (request.deploymentId != deploymentId) {
@@ -106,3 +157,9 @@ class MinecraftNotificationResource(
 }
 
 private data class NotificationScopeFilter(val type: String, val id: String)
+
+interface MinecraftNotificationScopeRequest {
+    val serverId: String?
+    val deploymentId: String?
+    val projectId: String?
+}

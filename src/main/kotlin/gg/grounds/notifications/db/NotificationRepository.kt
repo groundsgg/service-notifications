@@ -129,6 +129,40 @@ class NotificationRepository(
                 }
         }
 
+    fun recipientExistsInScope(
+        notificationId: UUID,
+        userId: String,
+        scopeType: String,
+        scopeId: String,
+    ): Boolean =
+        dataSource.connection.use { connection ->
+            connection
+                .prepareStatement(
+                    """
+                    SELECT 1
+                    FROM notification_recipients r
+                    JOIN notifications n ON n.id = r.notification_id
+                    WHERE r.notification_id = ? AND r.user_id = ?
+                      AND r.archived_at IS NULL
+                      AND n.scope_type = ? AND n.scope_id = ?
+                      AND (n.expires_at IS NULL OR n.expires_at > now())
+                    """
+                        .trimIndent()
+                )
+                .use { statement ->
+                    statement.setObject(1, notificationId)
+                    statement.setString(2, userId)
+                    statement.setString(3, scopeType)
+                    statement.setString(4, scopeId)
+                    val resultSet = statement.executeQuery()
+                    try {
+                        resultSet.next()
+                    } finally {
+                        resultSet.close()
+                    }
+                }
+        }
+
     fun findAction(notificationId: UUID, actionKey: String): StoredNotificationAction? =
         dataSource.connection.use { connection ->
             connection
