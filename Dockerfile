@@ -1,5 +1,3 @@
-# syntax=docker/dockerfile:1.9
-
 FROM eclipse-temurin:25-jdk AS build
 
 ARG GITHUB_USER
@@ -24,7 +22,7 @@ RUN --mount=type=cache,target=/root/.gradle/caches,sharing=locked \
         quarkusBuild -x test \
     '
 
-FROM eclipse-temurin:25-jre
+FROM gcr.io/distroless/java25-debian13 AS runtime
 
 ARG BUILD_VERSION
 ARG BUILD_COMMIT
@@ -35,9 +33,11 @@ LABEL org.opencontainers.image.title="service-notifications" \
       org.opencontainers.image.revision="${BUILD_COMMIT}" \
       org.opencontainers.image.created="${BUILD_AT}"
 
-WORKDIR /app
-RUN useradd --system --uid 1000 app
-COPY --from=build /workspace/build/quarkus-app/ /app/
-USER 1000
+WORKDIR /deployments/quarkus-app
+
+USER nonroot:nonroot
+
+COPY --from=build --chown=nonroot:nonroot /workspace/build/quarkus-app/ ./
+
 EXPOSE 8080
-ENTRYPOINT ["java", "-jar", "/app/quarkus-run.jar"]
+ENTRYPOINT ["java", "-jar", "quarkus-run.jar"]
