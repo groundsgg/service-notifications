@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.1](https://github.com/groundsgg/service-notifications/compare/service-notifications-v0.1.0...service-notifications-v0.1.1) (2026-05-31)
+
+
+### Bug Fixes
+
+* **docker:** use distroless runtime image ([47e0f33](https://github.com/groundsgg/service-notifications/commit/47e0f335a66b3cef8edc46a00f4c40584c9633f1))
+
 ## [0.1.0](https://github.com/groundsgg/service-notifications/compare/service-notifications-v0.0.1...service-notifications-v0.1.0) (2026-05-31)
 
 
