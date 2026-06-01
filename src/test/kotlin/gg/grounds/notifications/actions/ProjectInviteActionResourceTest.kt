@@ -13,6 +13,8 @@ import java.util.UUID
 import javax.sql.DataSource
 import org.hamcrest.CoreMatchers.equalTo
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertNotNull
+import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 
@@ -52,6 +54,7 @@ class ProjectInviteActionResourceTest {
             .body("status", equalTo("succeeded"))
 
         assertActionResultStatus(notificationId, "succeeded")
+        assertRecipientReadAtPresent(notificationId)
     }
 
     @Test
@@ -72,6 +75,7 @@ class ProjectInviteActionResourceTest {
 
         assertActionResultStatus(notificationId, "succeeded")
         assertActionResultCount(notificationId, 1)
+        assertRecipientReadAtPresent(notificationId)
         assertEquals(1, FakeForgeActionServer.requestCount("invite-idempotent", "accept"))
     }
 
@@ -94,6 +98,7 @@ class ProjectInviteActionResourceTest {
             .body("status", equalTo("succeeded"))
 
         assertActionResultStatus(notificationId, "succeeded")
+        assertRecipientReadAtPresent(notificationId)
     }
 
     @Test
@@ -112,6 +117,7 @@ class ProjectInviteActionResourceTest {
             .body("reason", equalTo("stale_invite"))
 
         assertActionResultStatus(notificationId, "rejected")
+        assertRecipientReadAtMissing(notificationId)
     }
 
     @Test
@@ -130,6 +136,7 @@ class ProjectInviteActionResourceTest {
             .body("reason", equalTo("wrong_recipient"))
 
         assertActionResultStatus(notificationId, "rejected")
+        assertRecipientReadAtMissing(notificationId)
     }
 
     @Test
@@ -147,6 +154,7 @@ class ProjectInviteActionResourceTest {
             .body("status", equalTo("failed"))
 
         assertActionResultStatus(notificationId, "failed")
+        assertRecipientReadAtMissing(notificationId)
     }
 
     private fun assertActionResultCount(notificationId: String, expectedCount: Int) {
@@ -161,6 +169,44 @@ class ProjectInviteActionResourceTest {
                     try {
                         resultSet.next()
                         assertEquals(expectedCount, resultSet.getInt(1))
+                    } finally {
+                        resultSet.close()
+                    }
+                }
+        }
+    }
+
+    private fun assertRecipientReadAtPresent(notificationId: String) {
+        dataSource.connection.use { connection ->
+            connection
+                .prepareStatement(
+                    "SELECT read_at FROM notification_recipients WHERE notification_id = ?"
+                )
+                .use { statement ->
+                    statement.setObject(1, UUID.fromString(notificationId))
+                    val resultSet = statement.executeQuery()
+                    try {
+                        resultSet.next()
+                        assertNotNull(resultSet.getObject("read_at"))
+                    } finally {
+                        resultSet.close()
+                    }
+                }
+        }
+    }
+
+    private fun assertRecipientReadAtMissing(notificationId: String) {
+        dataSource.connection.use { connection ->
+            connection
+                .prepareStatement(
+                    "SELECT read_at FROM notification_recipients WHERE notification_id = ?"
+                )
+                .use { statement ->
+                    statement.setObject(1, UUID.fromString(notificationId))
+                    val resultSet = statement.executeQuery()
+                    try {
+                        resultSet.next()
+                        assertNull(resultSet.getObject("read_at"))
                     } finally {
                         resultSet.close()
                     }

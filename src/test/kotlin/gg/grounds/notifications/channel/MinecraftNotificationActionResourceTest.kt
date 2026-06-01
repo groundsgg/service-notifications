@@ -10,6 +10,7 @@ import java.util.UUID
 import javax.sql.DataSource
 import org.hamcrest.CoreMatchers.equalTo
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 
@@ -71,6 +72,7 @@ class MinecraftNotificationActionResourceTest {
             .body("status", equalTo("succeeded"))
 
         assertActionResultStatus(notificationId, "succeeded")
+        assertRecipientReadAtPresent(notificationId)
     }
 
     @Test
@@ -322,6 +324,25 @@ class MinecraftNotificationActionResourceTest {
                     try {
                         resultSet.next()
                         assertEquals(expectedStatus, resultSet.getString("status"))
+                    } finally {
+                        resultSet.close()
+                    }
+                }
+        }
+    }
+
+    private fun assertRecipientReadAtPresent(notificationId: String) {
+        dataSource.connection.use { connection ->
+            connection
+                .prepareStatement(
+                    "SELECT read_at FROM notification_recipients WHERE notification_id = ?"
+                )
+                .use { statement ->
+                    statement.setObject(1, UUID.fromString(notificationId))
+                    val resultSet = statement.executeQuery()
+                    try {
+                        resultSet.next()
+                        assertNotNull(resultSet.getObject("read_at"))
                     } finally {
                         resultSet.close()
                     }
