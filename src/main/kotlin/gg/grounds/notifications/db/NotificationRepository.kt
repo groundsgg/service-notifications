@@ -506,19 +506,28 @@ class NotificationRepository(
     private fun listActions(
         connection: Connection,
         notificationId: UUID,
+        userId: String,
     ): List<NotificationActionItem> =
         connection
             .prepareStatement(
                 """
-                SELECT action_key, label, style
-                FROM notification_actions
-                WHERE notification_id = ?
-                ORDER BY created_at ASC
+                SELECT a.action_key, a.label, a.style
+                FROM notification_actions a
+                WHERE a.notification_id = ?
+                  AND NOT EXISTS (
+                    SELECT 1
+                    FROM notification_action_results ar
+                    WHERE ar.notification_id = a.notification_id
+                      AND ar.user_id = ?
+                      AND ar.status = 'succeeded'
+                  )
+                ORDER BY a.created_at ASC
                 """
                     .trimIndent()
             )
             .use { statement ->
                 statement.setObject(1, notificationId)
+                statement.setString(2, userId)
                 val resultSet = statement.executeQuery()
                 val actions = mutableListOf<NotificationActionItem>()
                 try {
@@ -545,11 +554,12 @@ class NotificationRepository(
         try {
             while (resultSet.next()) {
                 val notificationId = resultSet.getObject("id", UUID::class.java)
+                val recipientUserId = resultSet.getString("user_id")
                 items +=
                     NotificationInboxItem(
                         id = notificationId,
                         recipientId = resultSet.getObject("recipient_id", UUID::class.java),
-                        recipientUserId = resultSet.getString("user_id"),
+                        recipientUserId = recipientUserId,
                         type = resultSet.getString("type"),
                         category = resultSet.getString("category"),
                         priority = resultSet.getString("priority"),
@@ -558,7 +568,7 @@ class NotificationRepository(
                         data = objectMapper.readTree(resultSet.getString("data")),
                         createdAt = resultSet.getObject("created_at", OffsetDateTime::class.java),
                         readAt = resultSet.getObject("read_at", OffsetDateTime::class.java),
-                        actions = listActions(connection, notificationId),
+                        actions = listActions(connection, notificationId, recipientUserId),
                     )
             }
         } finally {

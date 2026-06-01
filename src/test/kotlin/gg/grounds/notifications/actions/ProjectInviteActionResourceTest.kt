@@ -12,6 +12,7 @@ import java.security.MessageDigest
 import java.util.UUID
 import javax.sql.DataSource
 import org.hamcrest.CoreMatchers.equalTo
+import org.hamcrest.CoreMatchers.notNullValue
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertNull
@@ -77,6 +78,38 @@ class ProjectInviteActionResourceTest {
         assertActionResultCount(notificationId, 1)
         assertRecipientReadAtPresent(notificationId)
         assertEquals(1, FakeForgeActionServer.requestCount("invite-idempotent", "accept"))
+    }
+
+    @Test
+    @TestSecurity(user = "user-alpha")
+    fun successfulProjectInviteActionRemovesActionsFromInbox() {
+        val notificationId =
+            createNotificationWithInvite(
+                inviteId = "invite-success-actions-hidden",
+                additionalActionKey = "project_invite.decline",
+            )
+
+        given()
+            .get("/v1/notifications")
+            .then()
+            .statusCode(200)
+            .body("items[0].actions.size()", equalTo(2))
+
+        given()
+            .header("X-Request-Id", "request-actions-hidden-1")
+            .contentType("application/json")
+            .body("{}")
+            .post("/v1/notifications/$notificationId/actions/project_invite.accept")
+            .then()
+            .statusCode(200)
+            .body("status", equalTo("succeeded"))
+
+        given()
+            .get("/v1/notifications")
+            .then()
+            .statusCode(200)
+            .body("items[0].readAt", notNullValue())
+            .body("items[0].actions.size()", equalTo(0))
     }
 
     @Test
@@ -217,12 +250,13 @@ class ProjectInviteActionResourceTest {
     private fun createNotificationWithInvite(
         inviteId: String,
         actionKey: String = "project_invite.accept",
+        additionalActionKey: String? = null,
     ): String {
         val token = seedChannelClient()
         return given()
             .header("Authorization", "Bearer $token")
             .contentType("application/json")
-            .body(notificationEventJson(inviteId, actionKey))
+            .body(notificationEventJson(inviteId, actionKey, additionalActionKey))
             .post("/v1/notification-events")
             .then()
             .statusCode(201)
@@ -230,8 +264,17 @@ class ProjectInviteActionResourceTest {
             .path("id")
     }
 
-    private fun notificationEventJson(inviteId: String, actionKey: String): String =
-        """
+    private fun notificationEventJson(
+        inviteId: String,
+        actionKey: String,
+        additionalActionKey: String? = null,
+    ): String {
+        val additionalAction =
+            additionalActionKey?.let {
+                """,
+            {"actionKey":"$it","label":"Additional action","style":"secondary","command":"$it","payload":{"inviteId":"$inviteId"}}"""
+            } ?: ""
+        return """
         {
           "idempotencyKey":"event-$inviteId",
           "type":"project_invite",
@@ -245,11 +288,12 @@ class ProjectInviteActionResourceTest {
           "data":{"inviteId":"$inviteId"},
           "recipients":[{"userId":"user-alpha"}],
           "actions":[
-            {"actionKey":"$actionKey","label":"Action","style":"primary","command":"$actionKey","payload":{"inviteId":"$inviteId"}}
+            {"actionKey":"$actionKey","label":"Action","style":"primary","command":"$actionKey","payload":{"inviteId":"$inviteId"}}$additionalAction
           ]
         }
         """
             .trimIndent()
+    }
 
     private fun seedChannelClient(): String {
         val token = "test-${UUID.randomUUID()}"
