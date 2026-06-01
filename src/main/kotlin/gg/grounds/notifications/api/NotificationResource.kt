@@ -15,6 +15,7 @@ import jakarta.ws.rs.BadRequestException
 import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.ForbiddenException
 import jakarta.ws.rs.GET
+import jakarta.ws.rs.NotFoundException
 import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.PathParam
@@ -63,6 +64,30 @@ class NotificationResource(
         rejectUserIdQuery(uriInfo)
         val userId = webUserResolver.requireUser(identity)
         return NotificationInboxResponse(notificationRepository.listForUser(userId))
+    }
+
+    @POST
+    @Path("/notifications/{id}/read")
+    @Authenticated
+    fun markNotificationRead(@PathParam("id") id: UUID, @Context uriInfo: UriInfo): Response {
+        rejectUserIdQuery(uriInfo)
+        val userId = webUserResolver.requireUser(identity)
+        if (!notificationRepository.markRecipientRead(id, userId)) {
+            throw NotFoundException("Notification recipient was not found")
+        }
+        return Response.noContent().build()
+    }
+
+    @POST
+    @Path("/notifications/{id}/unread")
+    @Authenticated
+    fun markNotificationUnread(@PathParam("id") id: UUID, @Context uriInfo: UriInfo): Response {
+        rejectUserIdQuery(uriInfo)
+        val userId = webUserResolver.requireUser(identity)
+        if (!notificationRepository.markRecipientUnread(id, userId)) {
+            throw NotFoundException("Notification recipient was not found")
+        }
+        return Response.noContent().build()
     }
 
     @POST

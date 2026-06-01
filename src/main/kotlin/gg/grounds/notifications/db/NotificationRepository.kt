@@ -112,6 +112,52 @@ class NotificationRepository(
                 }
         }
 
+    fun markRecipientRead(notificationId: UUID, userId: String): Boolean =
+        dataSource.connection.use { connection ->
+            connection
+                .prepareStatement(
+                    """
+                    UPDATE notification_recipients r
+                    SET read_at = COALESCE(r.read_at, now())
+                    FROM notifications n
+                    WHERE n.id = r.notification_id
+                      AND r.notification_id = ?
+                      AND r.user_id = ?
+                      AND r.archived_at IS NULL
+                      AND (n.expires_at IS NULL OR n.expires_at > now())
+                    """
+                        .trimIndent()
+                )
+                .use { statement ->
+                    statement.setObject(1, notificationId)
+                    statement.setString(2, userId)
+                    statement.executeUpdate() == 1
+                }
+        }
+
+    fun markRecipientUnread(notificationId: UUID, userId: String): Boolean =
+        dataSource.connection.use { connection ->
+            connection
+                .prepareStatement(
+                    """
+                    UPDATE notification_recipients r
+                    SET read_at = NULL
+                    FROM notifications n
+                    WHERE n.id = r.notification_id
+                      AND r.notification_id = ?
+                      AND r.user_id = ?
+                      AND r.archived_at IS NULL
+                      AND (n.expires_at IS NULL OR n.expires_at > now())
+                    """
+                        .trimIndent()
+                )
+                .use { statement ->
+                    statement.setObject(1, notificationId)
+                    statement.setString(2, userId)
+                    statement.executeUpdate() == 1
+                }
+        }
+
     fun recipientExists(notificationId: UUID, userId: String): Boolean =
         dataSource.connection.use { connection ->
             connection

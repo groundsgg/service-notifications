@@ -10,6 +10,7 @@ import java.util.UUID
 import javax.sql.DataSource
 import org.hamcrest.CoreMatchers.equalTo
 import org.hamcrest.CoreMatchers.notNullValue
+import org.hamcrest.CoreMatchers.nullValue
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -190,6 +191,120 @@ class NotificationResourceTest {
             .body("items.size()", equalTo(1))
             .body("items[0].title", equalTo("Project invite"))
             .body("items[0].recipientUserId", equalTo("user-alpha"))
+    }
+
+    @Test
+    @TestSecurity(user = "user-alpha")
+    fun markNotificationReadSetsReadAtForAuthenticatedRecipient() {
+        val token = seedChannelClient(channel = "api", scopes = listOf("notifications:write"))
+        val notificationId = postNotificationEvent(token, "event-read-1", "user-alpha")
+
+        given()
+            .contentType("application/json")
+            .`when`()
+            .post("/v1/notifications/$notificationId/read")
+            .then()
+            .statusCode(204)
+
+        given()
+            .`when`()
+            .get("/v1/notifications")
+            .then()
+            .statusCode(200)
+            .body("items.size()", equalTo(1))
+            .body("items[0].id", equalTo(notificationId))
+            .body("items[0].readAt", notNullValue())
+    }
+
+    @Test
+    @TestSecurity(user = "user-alpha")
+    fun markNotificationUnreadClearsReadAtForAuthenticatedRecipient() {
+        val token = seedChannelClient(channel = "api", scopes = listOf("notifications:write"))
+        val notificationId = postNotificationEvent(token, "event-unread-1", "user-alpha")
+
+        given()
+            .contentType("application/json")
+            .post("/v1/notifications/$notificationId/read")
+            .then()
+            .statusCode(204)
+
+        given()
+            .contentType("application/json")
+            .`when`()
+            .post("/v1/notifications/$notificationId/unread")
+            .then()
+            .statusCode(204)
+
+        given()
+            .`when`()
+            .get("/v1/notifications")
+            .then()
+            .statusCode(200)
+            .body("items.size()", equalTo(1))
+            .body("items[0].id", equalTo(notificationId))
+            .body("items[0].readAt", nullValue())
+    }
+
+    @Test
+    @TestSecurity(user = "user-beta")
+    fun markNotificationReadRejectsNonRecipientWithoutLeakingNotification() {
+        val token = seedChannelClient(channel = "api", scopes = listOf("notifications:write"))
+        val notificationId =
+            postNotificationEvent(token, "event-read-non-recipient-1", "user-alpha")
+
+        given()
+            .contentType("application/json")
+            .`when`()
+            .post("/v1/notifications/$notificationId/read")
+            .then()
+            .statusCode(404)
+    }
+
+    @Test
+    @TestSecurity(user = "user-alpha")
+    fun markNotificationReadRejectsUserIdQueryParameter() {
+        val token = seedChannelClient(channel = "api", scopes = listOf("notifications:write"))
+        val notificationId =
+            postNotificationEvent(token, "event-read-query-user-id-1", "user-alpha")
+
+        given()
+            .contentType("application/json")
+            .`when`()
+            .post("/v1/notifications/$notificationId/read?userId=user-alpha")
+            .then()
+            .statusCode(400)
+    }
+
+    @Test
+    @TestSecurity(user = "user-beta")
+    fun markNotificationUnreadRejectsNonRecipientWithoutLeakingNotification() {
+        val token = seedChannelClient(channel = "api", scopes = listOf("notifications:write"))
+        val notificationId =
+            postNotificationEvent(token, "event-unread-non-recipient-1", "user-alpha")
+
+        given()
+            .contentType("application/json")
+            .body("{}")
+            .`when`()
+            .post("/v1/notifications/$notificationId/unread")
+            .then()
+            .statusCode(404)
+    }
+
+    @Test
+    @TestSecurity(user = "user-alpha")
+    fun markNotificationUnreadRejectsUserIdQueryParameter() {
+        val token = seedChannelClient(channel = "api", scopes = listOf("notifications:write"))
+        val notificationId =
+            postNotificationEvent(token, "event-unread-query-user-id-1", "user-alpha")
+
+        given()
+            .contentType("application/json")
+            .body("{}")
+            .`when`()
+            .post("/v1/notifications/$notificationId/unread?userId=user-alpha")
+            .then()
+            .statusCode(400)
     }
 
     @Test
