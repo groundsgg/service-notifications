@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.2.0](https://github.com/groundsgg/service-notifications/compare/service-notifications-v0.1.1...service-notifications-v0.2.0) (2026-06-01)
+
+
+### Features
+
+* add notification read state endpoints ([ac38e03](https://github.com/groundsgg/service-notifications/commit/ac38e0324542036a2b7fe3701cc8f20638823753))
+
+
+### Bug Fixes
+
+* mark successful notification actions read ([893c87e](https://github.com/groundsgg/service-notifications/commit/893c87e3f092f466aa4e2cc98b5c3f4433455a63))
+
 ## [0.1.1](https://github.com/groundsgg/service-notifications/compare/service-notifications-v0.1.0...service-notifications-v0.1.1) (2026-05-31)
 
 
