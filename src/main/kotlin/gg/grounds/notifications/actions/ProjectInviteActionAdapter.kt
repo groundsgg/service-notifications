@@ -69,10 +69,12 @@ class ProjectInviteActionAdapter(
         } catch (exception: Exception) {
             LOG.errorf(
                 exception,
-                "Failed to execute project invite action (notificationId=%s, actionKey=%s, requestId=%s)",
+                "Failed to execute project invite action (notificationId=%s, actionKey=%s, userId=%s, requestId=%s, inviteId=%s)",
                 action.notificationId,
                 action.actionKey,
+                userId,
                 requestId,
+                inviteId,
             )
             ActionExecutionResponse("failed", "forge_unavailable")
         }

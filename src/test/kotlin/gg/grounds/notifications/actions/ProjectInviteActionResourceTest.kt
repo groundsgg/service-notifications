@@ -10,12 +10,18 @@ import jakarta.inject.Inject
 import java.net.InetSocketAddress
 import java.security.MessageDigest
 import java.util.UUID
+import java.util.logging.Handler
+import java.util.logging.Level
+import java.util.logging.LogRecord
+import java.util.logging.Logger
 import javax.sql.DataSource
 import org.hamcrest.CoreMatchers.equalTo
 import org.hamcrest.CoreMatchers.notNullValue
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertNull
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 
@@ -190,6 +196,70 @@ class ProjectInviteActionResourceTest {
         assertRecipientReadAtMissing(notificationId)
     }
 
+    @Test
+    @TestSecurity(user = "user-alpha")
+    fun failedProjectInviteActionLogsFailureOutcomeWithRequestContext() {
+        val notificationId = createNotificationWithInvite("invite-error-logged")
+        val records =
+            captureLogs(NotificationActionService::class.java.name) {
+                given()
+                    .header("X-Request-Id", "request-error-logged-1")
+                    .contentType("application/json")
+                    .body("{}")
+                    .post("/v1/notifications/$notificationId/actions/project_invite.accept")
+                    .then()
+                    .statusCode(200)
+                    .body("status", equalTo("failed"))
+            }
+
+        assertFalse(
+            records.any { it.level == Level.INFO && it.message.contains("status=failed") },
+            "Failed notification actions must not be logged at INFO",
+        )
+        assertTrue(
+            records.any {
+                it.level == Level.SEVERE &&
+                    it.message.contains("Failed to handle notification action") &&
+                    it.message.contains("notificationId=$notificationId") &&
+                    it.message.contains("actionKey=project_invite.accept") &&
+                    it.message.contains("userId=user-alpha") &&
+                    it.message.contains("requestId=request-error-logged-1") &&
+                    it.message.contains("reason=forge_status_500")
+            },
+            "Failed notification action log must be ERROR-level and include request context",
+        )
+    }
+
+    @Test
+    @TestSecurity(user = "user-alpha")
+    fun unavailableForgeLogsActionFailureWithInviteAndUserContext() {
+        val notificationId = createNotificationWithInvite("invite-unavailable")
+        val records =
+            captureLogs(ProjectInviteActionAdapter::class.java.name) {
+                given()
+                    .header("X-Request-Id", "request-unavailable-1")
+                    .contentType("application/json")
+                    .body("{}")
+                    .post("/v1/notifications/$notificationId/actions/project_invite.accept")
+                    .then()
+                    .statusCode(200)
+                    .body("status", equalTo("failed"))
+            }
+
+        assertTrue(
+            records.any {
+                it.level == Level.SEVERE &&
+                    it.message.contains("Failed to execute project invite action") &&
+                    it.message.contains("notificationId=$notificationId") &&
+                    it.message.contains("actionKey=project_invite.accept") &&
+                    it.message.contains("userId=user-alpha") &&
+                    it.message.contains("requestId=request-unavailable-1") &&
+                    it.message.contains("inviteId=invite-unavailable")
+            },
+            "Forge action failure log must include notification, request, user, and invite context",
+        )
+    }
+
     private fun assertActionResultCount(notificationId: String, expectedCount: Int) {
         dataSource.connection.use { connection ->
             connection
@@ -342,6 +412,28 @@ class ProjectInviteActionResourceTest {
         val digest = MessageDigest.getInstance("SHA-256").digest(token.toByteArray(Charsets.UTF_8))
         return digest.joinToString("") { "%02x".format(it) }
     }
+
+    private fun captureLogs(loggerName: String, block: () -> Unit): List<LogRecord> {
+        val records = mutableListOf<LogRecord>()
+        val logger = Logger.getLogger(loggerName)
+        val handler =
+            object : Handler() {
+                override fun publish(record: LogRecord) {
+                    records += record
+                }
+
+                override fun flush() = Unit
+
+                override fun close() = Unit
+            }
+        logger.addHandler(handler)
+        return try {
+            block()
+            records.toList()
+        } finally {
+            logger.removeHandler(handler)
+        }
+    }
 }
 
 class FakeForgeActionServer : QuarkusTestResourceLifecycleManager {
@@ -361,6 +453,10 @@ class FakeForgeActionServer : QuarkusTestResourceLifecycleManager {
             val inviteId =
                 exchange.requestURI.path.substringAfter("project-invites/").substringBefore('/')
             val action = exchange.requestURI.path.substringAfterLast('/')
+            if (inviteId == "invite-unavailable") {
+                exchange.close()
+                return@createContext
+            }
             requests.merge("$inviteId:$action", 1, Int::plus)
             val status =
                 when {
