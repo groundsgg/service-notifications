@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0](https://github.com/groundsgg/service-notifications/compare/service-notifications-v0.3.1...service-notifications-v0.4.0) (2026-06-02)
+
+
+### Features
+
+* add notification live stream ([#9](https://github.com/groundsgg/service-notifications/issues/9)) ([f5bfdcb](https://github.com/groundsgg/service-notifications/commit/f5bfdcb45c82f68e6153939311969901fa0386ef))
+
 ## [0.3.1](https://github.com/groundsgg/service-notifications/compare/service-notifications-v0.3.0...service-notifications-v0.3.1) (2026-06-02)
 
 
