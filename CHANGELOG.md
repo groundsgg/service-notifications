@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.1](https://github.com/groundsgg/service-notifications/compare/service-notifications-v0.3.0...service-notifications-v0.3.1) (2026-06-02)
+
+
+### Bug Fixes
+
+* authorize notification admins via forge access ([2026879](https://github.com/groundsgg/service-notifications/commit/202687949e30d1d2fc7c63c4ce82ac1ffc0e243a))
+
 ## [0.3.0](https://github.com/groundsgg/service-notifications/compare/service-notifications-v0.2.0...service-notifications-v0.3.0) (2026-06-02)
 
 
