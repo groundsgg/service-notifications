@@ -12,6 +12,8 @@ import jakarta.ws.rs.Path
 import jakarta.ws.rs.PathParam
 import jakarta.ws.rs.Produces
 import jakarta.ws.rs.QueryParam
+import jakarta.ws.rs.core.Context
+import jakarta.ws.rs.core.HttpHeaders
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
 import java.util.UUID
@@ -27,32 +29,39 @@ class NotificationAdminResource(
     @GET
     @Path("/diagnostics")
     @Authenticated
-    fun diagnostics(): NotificationAdminDiagnosticsResponse {
-        authorization.requireNotificationsAdmin(identity)
+    fun diagnostics(@Context headers: HttpHeaders): NotificationAdminDiagnosticsResponse {
+        authorization.requireNotificationsAdmin(identity, headers)
         return repository.diagnostics()
     }
 
     @GET
     @Path("/types")
     @Authenticated
-    fun notificationTypes(): NotificationAdminListResponse<NotificationTypeAdminItem> {
-        authorization.requireNotificationsAdmin(identity)
+    fun notificationTypes(
+        @Context headers: HttpHeaders
+    ): NotificationAdminListResponse<NotificationTypeAdminItem> {
+        authorization.requireNotificationsAdmin(identity, headers)
         return NotificationAdminListResponse(repository.listNotificationTypes())
     }
 
     @GET
     @Path("/channel-clients")
     @Authenticated
-    fun channelClients(): NotificationAdminListResponse<ChannelClientAdminItem> {
-        authorization.requireNotificationsAdmin(identity)
+    fun channelClients(
+        @Context headers: HttpHeaders
+    ): NotificationAdminListResponse<ChannelClientAdminItem> {
+        authorization.requireNotificationsAdmin(identity, headers)
         return NotificationAdminListResponse(repository.listChannelClients())
     }
 
     @POST
     @Path("/channel-clients")
     @Authenticated
-    fun createChannelClient(request: CreateChannelClientRequest): Response {
-        val actorUserId = authorization.requireNotificationsAdmin(identity)
+    fun createChannelClient(
+        request: CreateChannelClientRequest,
+        @Context headers: HttpHeaders,
+    ): Response {
+        val actorUserId = authorization.requireNotificationsAdmin(identity, headers)
         val sanitizedRequest = request.validated()
         return Response.status(Response.Status.CREATED)
             .entity(repository.createChannelClient(sanitizedRequest, actorUserId))
@@ -63,8 +72,11 @@ class NotificationAdminResource(
     @Path("/channel-clients/{id}/rotate")
     @Consumes(MediaType.WILDCARD)
     @Authenticated
-    fun rotateChannelClient(@PathParam("id") id: String): ChannelClientSecretResponse {
-        val actorUserId = authorization.requireNotificationsAdmin(identity)
+    fun rotateChannelClient(
+        @PathParam("id") id: String,
+        @Context headers: HttpHeaders,
+    ): ChannelClientSecretResponse {
+        val actorUserId = authorization.requireNotificationsAdmin(identity, headers)
         return repository.rotateChannelClient(parseUuid(id), actorUserId)
     }
 
@@ -72,8 +84,11 @@ class NotificationAdminResource(
     @Path("/channel-clients/{id}/revoke")
     @Consumes(MediaType.WILDCARD)
     @Authenticated
-    fun revokeChannelClient(@PathParam("id") id: String): ChannelClientResponse {
-        val actorUserId = authorization.requireNotificationsAdmin(identity)
+    fun revokeChannelClient(
+        @PathParam("id") id: String,
+        @Context headers: HttpHeaders,
+    ): ChannelClientResponse {
+        val actorUserId = authorization.requireNotificationsAdmin(identity, headers)
         return repository.revokeChannelClient(parseUuid(id), actorUserId)
     }
 
@@ -86,8 +101,9 @@ class NotificationAdminResource(
         @QueryParam("notificationId") notificationId: String?,
         @QueryParam("userId") userId: String?,
         @QueryParam("limit") limit: String?,
+        @Context headers: HttpHeaders,
     ): NotificationAdminListResponse<DeliveryAttemptAdminItem> {
-        authorization.requireNotificationsAdmin(identity)
+        authorization.requireNotificationsAdmin(identity, headers)
         return NotificationAdminListResponse(
             repository.listDeliveryAttempts(
                 status = status.queryValue(),
@@ -107,8 +123,9 @@ class NotificationAdminResource(
         @QueryParam("notificationId") notificationId: String?,
         @QueryParam("userId") userId: String?,
         @QueryParam("limit") limit: String?,
+        @Context headers: HttpHeaders,
     ): NotificationAdminListResponse<ActionResultAdminItem> {
-        authorization.requireNotificationsAdmin(identity)
+        authorization.requireNotificationsAdmin(identity, headers)
         return NotificationAdminListResponse(
             repository.listActionResults(
                 status = status.queryValue(),
@@ -126,8 +143,9 @@ class NotificationAdminResource(
         @QueryParam("notificationId") notificationId: String?,
         @QueryParam("userId") userId: String?,
         @QueryParam("limit") limit: String?,
+        @Context headers: HttpHeaders,
     ): NotificationAdminListResponse<RecipientResolutionAdminItem> {
-        authorization.requireNotificationsAdmin(identity)
+        authorization.requireNotificationsAdmin(identity, headers)
         return NotificationAdminListResponse(
             repository.listRecipientResolutions(
                 notificationId = parseOptionalUuid(notificationId),
@@ -141,9 +159,10 @@ class NotificationAdminResource(
     @Path("/team-defaults")
     @Authenticated
     fun teamDefaults(
-        @QueryParam("teamId") teamId: String?
+        @QueryParam("teamId") teamId: String?,
+        @Context headers: HttpHeaders,
     ): NotificationAdminListResponse<TeamNotificationDefaultAdminItem> {
-        authorization.requireNotificationsAdmin(identity)
+        authorization.requireNotificationsAdmin(identity, headers)
         return NotificationAdminListResponse(repository.listTeamDefaults(teamId.queryValue()))
     }
 
@@ -154,8 +173,9 @@ class NotificationAdminResource(
         @PathParam("teamId") teamId: String,
         @PathParam("category") category: String,
         request: UpsertTeamNotificationDefaultRequest,
+        @Context headers: HttpHeaders,
     ): TeamNotificationDefaultAdminItem {
-        val actorUserId = authorization.requireNotificationsAdmin(identity)
+        val actorUserId = authorization.requireNotificationsAdmin(identity, headers)
         val sanitizedTeamId =
             teamId.trim().ifBlank { throw BadRequestException("team_id_required") }
         val sanitizedCategory =
