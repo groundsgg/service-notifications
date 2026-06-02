@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.3.0](https://github.com/groundsgg/service-notifications/compare/service-notifications-v0.2.0...service-notifications-v0.3.0) (2026-06-02)
+
+
+### Features
+
+* add notification admin endpoints ([#6](https://github.com/groundsgg/service-notifications/issues/6)) ([5060334](https://github.com/groundsgg/service-notifications/commit/50603348cbb00608c1323c99a71d176e4c6761d5))
+
+
+### Bug Fixes
+
+* align notification logging conventions ([#7](https://github.com/groundsgg/service-notifications/issues/7)) ([6cce15a](https://github.com/groundsgg/service-notifications/commit/6cce15aa994bbd481882cd93e6d02119fc27bf74))
+* hide completed notification actions ([119d48d](https://github.com/groundsgg/service-notifications/commit/119d48d43608657fe52b6c4acd88f449c64026b5))
+
 ## [0.2.0](https://github.com/groundsgg/service-notifications/compare/service-notifications-v0.1.1...service-notifications-v0.2.0) (2026-06-01)
 
 
