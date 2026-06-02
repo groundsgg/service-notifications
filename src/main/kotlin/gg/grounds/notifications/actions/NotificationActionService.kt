@@ -26,14 +26,47 @@ class NotificationActionService(
                     else -> ActionExecutionResponse("failed", "unsupported_action")
                 }
             }
-        LOG.infof(
-            "Handled notification action (notificationId=%s, actionKey=%s, userId=%s, status=%s)",
-            notificationId,
-            actionKey,
-            userId,
-            result.status,
-        )
+        logActionOutcome(notificationId, actionKey, userId, requestId, result)
         return result
+    }
+
+    private fun logActionOutcome(
+        notificationId: UUID,
+        actionKey: String,
+        userId: String,
+        requestId: String,
+        result: ActionExecutionResponse,
+    ) {
+        when (result.status) {
+            "succeeded" ->
+                LOG.infof(
+                    "Handled notification action successfully (notificationId=%s, actionKey=%s, userId=%s, requestId=%s, status=%s)",
+                    notificationId,
+                    actionKey,
+                    userId,
+                    requestId,
+                    result.status,
+                )
+            "rejected" ->
+                LOG.warnf(
+                    "Rejected notification action (notificationId=%s, actionKey=%s, userId=%s, requestId=%s, reason=%s)",
+                    notificationId,
+                    actionKey,
+                    userId,
+                    requestId,
+                    result.reason ?: "unknown",
+                )
+            else ->
+                LOG.errorf(
+                    "Failed to handle notification action (notificationId=%s, actionKey=%s, userId=%s, requestId=%s, status=%s, reason=%s)",
+                    notificationId,
+                    actionKey,
+                    userId,
+                    requestId,
+                    result.status,
+                    result.reason ?: "unknown",
+                )
+        }
     }
 
     companion object {
