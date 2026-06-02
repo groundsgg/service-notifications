@@ -1,11 +1,14 @@
 package gg.grounds.notifications.api
 
 import gg.grounds.notifications.channel.InMemoryMinecraftPlayerResolver
+import gg.grounds.notifications.live.NotificationLiveBroadcaster
+import gg.grounds.notifications.live.NotificationLiveEvent
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
 import io.restassured.RestAssured.given
 import jakarta.inject.Inject
 import java.security.MessageDigest
+import java.time.OffsetDateTime
 import java.util.UUID
 import javax.sql.DataSource
 import org.hamcrest.CoreMatchers.equalTo
@@ -20,6 +23,10 @@ class NotificationResourceTest {
     @Inject lateinit var dataSource: DataSource
 
     @Inject lateinit var playerResolver: InMemoryMinecraftPlayerResolver
+
+    @Inject lateinit var resource: NotificationResource
+
+    @Inject lateinit var liveBroadcaster: NotificationLiveBroadcaster
 
     @BeforeEach
     fun resetDatabase() {
@@ -191,6 +198,30 @@ class NotificationResourceTest {
             .body("items.size()", equalTo(1))
             .body("items[0].title", equalTo("Project invite"))
             .body("items[0].recipientUserId", equalTo("user-alpha"))
+    }
+
+    @Test
+    @TestSecurity(user = "user-alpha")
+    fun liveStreamRegistersAuthenticatedUser() {
+        val sink = RecordingSseEventSink()
+
+        resource.streamNotifications(sink)
+
+        assertEquals(1, liveBroadcaster.listenerCount("user-alpha"))
+
+        liveBroadcaster.publish(
+            NotificationLiveEvent(
+                type = "notifications.changed",
+                userId = "user-alpha",
+                notificationId = "notif-1",
+                reason = "created",
+                occurredAt = OffsetDateTime.parse("2026-06-02T12:34:56.789Z"),
+            ),
+        )
+
+        assertEquals(1, sink.events.size)
+        assertEquals("notifications.changed", sink.events.single().getName())
+        assertEquals("{\"type\":\"notifications.changed\",\"userId\":\"user-alpha\",\"notificationId\":\"notif-1\",\"reason\":\"created\",\"occurredAt\":\"2026-06-02T12:34:56.789Z\"}", sink.events.single().getData())
     }
 
     @Test
@@ -562,5 +593,20 @@ class NotificationResourceTest {
                 }
             }
         }
+    }
+
+    private class RecordingSseEventSink : jakarta.ws.rs.sse.SseEventSink {
+        val events = mutableListOf<jakarta.ws.rs.sse.OutboundSseEvent>()
+
+        override fun isClosed(): Boolean = false
+
+        override fun send(
+            event: jakarta.ws.rs.sse.OutboundSseEvent,
+        ): java.util.concurrent.CompletionStage<*> {
+            events += event
+            return java.util.concurrent.CompletableFuture.completedFuture(null)
+        }
+
+        override fun close() = Unit
     }
 }
