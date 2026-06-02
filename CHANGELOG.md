@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.1](https://github.com/groundsgg/service-notifications/compare/service-notifications-v0.4.0...service-notifications-v0.4.1) (2026-06-02)
+
+
+### Bug Fixes
+
+* apply spotless formatting ([#11](https://github.com/groundsgg/service-notifications/issues/11)) ([3dd9d00](https://github.com/groundsgg/service-notifications/commit/3dd9d0029305783ee716315bd59ca1d40890291d))
+
 ## [0.4.0](https://github.com/groundsgg/service-notifications/compare/service-notifications-v0.3.1...service-notifications-v0.4.0) (2026-06-02)
 
 
