@@ -1,13 +1,13 @@
 package gg.grounds.notifications.live
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import io.quarkus.scheduler.Scheduled
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.sse.OutboundSseEvent
 import jakarta.ws.rs.sse.Sse
 import jakarta.ws.rs.sse.SseEventSink
-import io.quarkus.scheduler.Scheduled
 import java.time.OffsetDateTime
 import java.util.concurrent.ConcurrentHashMap
 import org.jboss.logging.Logger
@@ -22,7 +22,11 @@ class NotificationLiveBroadcaster {
 
     fun register(userId: String, sink: SseEventSink) {
         sinks.computeIfAbsent(userId) { ConcurrentHashMap.newKeySet() }.add(sink)
-        LOG.infof("Registered notification live stream (userId=%s, listenerCount=%d)", userId, listenerCount(userId))
+        LOG.infof(
+            "Registered notification live stream (userId=%s, listenerCount=%d)",
+            userId,
+            listenerCount(userId),
+        )
     }
 
     fun publish(event: NotificationLiveEvent) {
@@ -54,7 +58,7 @@ class NotificationLiveBroadcaster {
                     notificationId = "",
                     reason = "heartbeat",
                     occurredAt = now,
-                ),
+                )
             )
         }
     }

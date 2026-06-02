@@ -216,12 +216,15 @@ class NotificationResourceTest {
                 notificationId = "notif-1",
                 reason = "created",
                 occurredAt = OffsetDateTime.parse("2026-06-02T12:34:56.789Z"),
-            ),
+            )
         )
 
         assertEquals(1, sink.events.size)
         assertEquals("notifications.changed", sink.events.single().getName())
-        assertEquals("{\"type\":\"notifications.changed\",\"userId\":\"user-alpha\",\"notificationId\":\"notif-1\",\"reason\":\"created\",\"occurredAt\":\"2026-06-02T12:34:56.789Z\"}", sink.events.single().getData())
+        assertEquals(
+            "{\"type\":\"notifications.changed\",\"userId\":\"user-alpha\",\"notificationId\":\"notif-1\",\"reason\":\"created\",\"occurredAt\":\"2026-06-02T12:34:56.789Z\"}",
+            sink.events.single().getData(),
+        )
     }
 
     @Test
@@ -601,7 +604,7 @@ class NotificationResourceTest {
         override fun isClosed(): Boolean = false
 
         override fun send(
-            event: jakarta.ws.rs.sse.OutboundSseEvent,
+            event: jakarta.ws.rs.sse.OutboundSseEvent
         ): java.util.concurrent.CompletionStage<*> {
             events += event
             return java.util.concurrent.CompletableFuture.completedFuture(null)
