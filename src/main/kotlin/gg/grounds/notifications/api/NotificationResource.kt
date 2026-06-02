@@ -64,7 +64,7 @@ class NotificationResource(
                         notificationId = response.id.toString(),
                         reason = "created",
                         occurredAt = java.time.OffsetDateTime.now(),
-                    ),
+                    )
                 )
             }
         }
@@ -108,7 +108,7 @@ class NotificationResource(
                 notificationId = id.toString(),
                 reason = "read",
                 occurredAt = java.time.OffsetDateTime.now(),
-            ),
+            )
         )
         return Response.noContent().build()
     }
@@ -129,7 +129,7 @@ class NotificationResource(
                 notificationId = id.toString(),
                 reason = "unread",
                 occurredAt = java.time.OffsetDateTime.now(),
-            ),
+            )
         )
         return Response.noContent().build()
     }

@@ -38,7 +38,7 @@ class NotificationActionService(
                     notificationId = notificationId.toString(),
                     reason = "action",
                     occurredAt = OffsetDateTime.now(),
-                ),
+                )
             )
         }
         logActionOutcome(notificationId, actionKey, userId, requestId, result)
