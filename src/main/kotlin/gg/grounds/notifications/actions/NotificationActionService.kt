@@ -2,7 +2,10 @@ package gg.grounds.notifications.actions
 
 import gg.grounds.notifications.core.ActionExecutionResponse
 import gg.grounds.notifications.db.NotificationRepository
+import gg.grounds.notifications.live.NotificationLiveBroadcaster
+import gg.grounds.notifications.live.NotificationLiveEvent
 import jakarta.enterprise.context.ApplicationScoped
+import java.time.OffsetDateTime
 import java.util.UUID
 import org.jboss.logging.Logger
 
@@ -10,6 +13,7 @@ import org.jboss.logging.Logger
 class NotificationActionService(
     private val notificationRepository: NotificationRepository,
     private val projectInviteActionAdapter: ProjectInviteActionAdapter,
+    private val liveBroadcaster: NotificationLiveBroadcaster,
 ) {
     fun execute(
         notificationId: UUID,
@@ -26,6 +30,17 @@ class NotificationActionService(
                     else -> ActionExecutionResponse("failed", "unsupported_action")
                 }
             }
+        if (result.status == "succeeded") {
+            liveBroadcaster.publish(
+                NotificationLiveEvent(
+                    type = "notifications.changed",
+                    userId = userId,
+                    notificationId = notificationId.toString(),
+                    reason = "action",
+                    occurredAt = OffsetDateTime.now(),
+                ),
+            )
+        }
         logActionOutcome(notificationId, actionKey, userId, requestId, result)
         return result
     }
