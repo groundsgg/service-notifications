@@ -142,6 +142,24 @@ class ProjectInviteActionResourceTest {
 
     @Test
     @TestSecurity(user = "user-alpha")
+    fun clusterResumeStoresSucceededResultWhenForgeResumesCluster() {
+        val notificationId = createNotificationWithCluster("cluster-success")
+
+        given()
+            .header("X-Request-Id", "request-cluster-resume-1")
+            .contentType("application/json")
+            .body("{}")
+            .post("/v1/notifications/$notificationId/actions/cluster.resume")
+            .then()
+            .statusCode(200)
+            .body("status", equalTo("succeeded"))
+
+        assertActionResultStatus(notificationId, "succeeded")
+        assertEquals(1, FakeForgeActionServer.requestCount("cluster-success", "resume"))
+    }
+
+    @Test
+    @TestSecurity(user = "user-alpha")
     fun projectInviteAcceptStoresRejectedResultWhenForgeReportsStaleInvite() {
         val notificationId = createNotificationWithInvite("invite-stale")
 
@@ -334,6 +352,19 @@ class ProjectInviteActionResourceTest {
             .path("id")
     }
 
+    private fun createNotificationWithCluster(devClusterId: String): String {
+        val token = seedChannelClient()
+        return given()
+            .header("Authorization", "Bearer $token")
+            .contentType("application/json")
+            .body(clusterNotificationEventJson(devClusterId))
+            .post("/v1/notification-events")
+            .then()
+            .statusCode(201)
+            .extract()
+            .path("id")
+    }
+
     private fun notificationEventJson(
         inviteId: String,
         actionKey: String,
@@ -359,6 +390,28 @@ class ProjectInviteActionResourceTest {
           "recipients":[{"userId":"user-alpha"}],
           "actions":[
             {"actionKey":"$actionKey","label":"Action","style":"primary","command":"$actionKey","payload":{"inviteId":"$inviteId"}}$additionalAction
+          ]
+        }
+        """
+            .trimIndent()
+    }
+
+    private fun clusterNotificationEventJson(devClusterId: String): String {
+        return """
+        {
+          "idempotencyKey":"event-$devClusterId",
+          "type":"dev_cluster.paused",
+          "category":"cluster",
+          "priority":"normal",
+          "scope":{"type":"project","id":"project-1"},
+          "actor":{"type":"system","id":"pause-janitor"},
+          "entity":{"type":"dev_cluster","id":"$devClusterId"},
+          "title":"Workspace paused",
+          "body":"The workspace was paused.",
+          "data":{"devClusterId":"$devClusterId"},
+          "recipients":[{"userId":"user-alpha"}],
+          "actions":[
+            {"actionKey":"cluster.resume","label":"Resume","style":"primary","command":"cluster.resume","payload":{"devClusterId":"$devClusterId"}}
           ]
         }
         """
@@ -452,14 +505,20 @@ class FakeForgeActionServer : QuarkusTestResourceLifecycleManager {
             }
             val inviteId =
                 exchange.requestURI.path.substringAfter("project-invites/").substringBefore('/')
+            val clusterId =
+                exchange.requestURI.path.substringAfter("dev-clusters/").substringBefore('/')
             val action = exchange.requestURI.path.substringAfterLast('/')
             if (inviteId == "invite-unavailable") {
                 exchange.close()
                 return@createContext
             }
-            requests.merge("$inviteId:$action", 1, Int::plus)
+            val actionTarget =
+                if (exchange.requestURI.path.contains("/dev-clusters/")) clusterId else inviteId
+            requests.merge("$actionTarget:$action", 1, Int::plus)
             val status =
                 when {
+                    exchange.requestURI.path.contains("cluster-success") &&
+                        exchange.requestURI.path.endsWith("/resume") -> 200
                     exchange.requestURI.path.contains("invite-decline-success") &&
                         exchange.requestURI.path.endsWith("/decline") -> 200
                     exchange.requestURI.path.contains("invite-success") -> 200

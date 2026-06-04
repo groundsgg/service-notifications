@@ -13,6 +13,7 @@ import org.jboss.logging.Logger
 class NotificationActionService(
     private val notificationRepository: NotificationRepository,
     private val projectInviteActionAdapter: ProjectInviteActionAdapter,
+    private val clusterResumeActionAdapter: ClusterResumeActionAdapter,
     private val liveBroadcaster: NotificationLiveBroadcaster,
 ) {
     fun execute(
@@ -27,6 +28,8 @@ class NotificationActionService(
                     "project_invite.accept",
                     "project_invite.decline" ->
                         projectInviteActionAdapter.execute(action, userId, requestId)
+                    "cluster.resume" ->
+                        clusterResumeActionAdapter.execute(action, userId, requestId)
                     else -> ActionExecutionResponse("failed", "unsupported_action")
                 }
             }
