@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0](https://github.com/groundsgg/service-notifications/compare/service-notifications-v0.4.1...service-notifications-v0.5.0) (2026-06-04)
+
+
+### Features
+
+* support cluster resume notification actions ([#13](https://github.com/groundsgg/service-notifications/issues/13)) ([661c522](https://github.com/groundsgg/service-notifications/commit/661c5222fed0303f21fa7a2735bf5080b636ef07))
+
 ## [0.4.1](https://github.com/groundsgg/service-notifications/compare/service-notifications-v0.4.0...service-notifications-v0.4.1) (2026-06-02)
 
 
