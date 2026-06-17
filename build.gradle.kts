@@ -31,6 +31,7 @@ dependencies {
     implementation("io.quarkus:quarkus-smallrye-health")
     implementation("io.quarkus:quarkus-smallrye-openapi")
     implementation("com.fasterxml.jackson.module:jackson-module-kotlin")
+    implementation("io.nats:jnats:2.25.3")
 
     testImplementation("io.quarkus:quarkus-junit5")
     testImplementation("io.quarkus:quarkus-test-security")
