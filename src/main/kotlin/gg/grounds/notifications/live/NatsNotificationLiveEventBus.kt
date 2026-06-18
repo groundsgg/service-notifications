@@ -19,11 +19,18 @@ class NatsNotificationLiveEventBus(
     private val natsUrl: String,
     @param:ConfigProperty(name = "notifications.nats.token", defaultValue = "")
     private val natsToken: String,
+    @param:ConfigProperty(name = "notifications.nats.token-file", defaultValue = "")
+    private val natsTokenFile: String,
 ) : NotificationLiveEventPublisher {
     private val publisher =
         RecoveringNatsPublisher(
             objectMapper,
-            JnatsClientFactory(objectMapper, broadcaster, natsUrl, natsToken),
+            JnatsClientFactory(
+                objectMapper,
+                broadcaster,
+                natsUrl,
+                NatsTokenResolver(natsToken, natsTokenFile),
+            ),
         )
 
     override fun publish(event: NotificationLiveEvent): Boolean = publisher.publish(event)
@@ -168,7 +175,7 @@ class NatsNotificationLiveEventBus(
         private val objectMapper: ObjectMapper,
         private val broadcaster: NotificationLiveBroadcaster,
         private val natsUrl: String,
-        private val natsToken: String,
+        private val tokenResolver: NatsTokenResolver,
     ) : NatsClientFactory {
         override val enabled = natsUrl.isNotBlank()
 
@@ -187,9 +194,7 @@ class NatsNotificationLiveEventBus(
 
             val optionsBuilder =
                 Options.Builder().server(natsUrl).connectionName("service-notifications")
-            if (natsToken.isNotBlank()) {
-                optionsBuilder.token(natsToken.toCharArray())
-            }
+            tokenResolver.resolve()?.let { optionsBuilder.token(it) }
 
             var connection: Connection? = null
             try {
