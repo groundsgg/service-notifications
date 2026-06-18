@@ -2,8 +2,8 @@ package gg.grounds.notifications.actions
 
 import gg.grounds.notifications.core.ActionExecutionResponse
 import gg.grounds.notifications.db.NotificationRepository
-import gg.grounds.notifications.live.NotificationLiveBroadcaster
 import gg.grounds.notifications.live.NotificationLiveEvent
+import gg.grounds.notifications.live.NotificationLiveEventPublisher
 import jakarta.enterprise.context.ApplicationScoped
 import java.time.OffsetDateTime
 import java.util.UUID
@@ -14,7 +14,7 @@ class NotificationActionService(
     private val notificationRepository: NotificationRepository,
     private val projectInviteActionAdapter: ProjectInviteActionAdapter,
     private val clusterResumeActionAdapter: ClusterResumeActionAdapter,
-    private val liveBroadcaster: NotificationLiveBroadcaster,
+    private val liveEventPublisher: NotificationLiveEventPublisher,
 ) {
     fun execute(
         notificationId: UUID,
@@ -34,7 +34,7 @@ class NotificationActionService(
                 }
             }
         if (result.status == "succeeded") {
-            liveBroadcaster.publish(
+            publishLiveEvent(
                 NotificationLiveEvent(
                     type = "notifications.changed",
                     userId = userId,
@@ -46,6 +46,20 @@ class NotificationActionService(
         }
         logActionOutcome(notificationId, actionKey, userId, requestId, result)
         return result
+    }
+
+    private fun publishLiveEvent(event: NotificationLiveEvent) {
+        try {
+            liveEventPublisher.publish(event)
+        } catch (exception: Exception) {
+            LOG.warnf(
+                exception,
+                "Failed to publish best-effort notification live event (notificationId=%s, userId=%s, reason=%s)",
+                event.notificationId,
+                event.userId,
+                event.reason,
+            )
+        }
     }
 
     private fun logActionOutcome(

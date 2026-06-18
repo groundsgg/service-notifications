@@ -3,6 +3,7 @@ package gg.grounds.notifications.api
 import gg.grounds.notifications.channel.InMemoryMinecraftPlayerResolver
 import gg.grounds.notifications.live.NotificationLiveBroadcaster
 import gg.grounds.notifications.live.NotificationLiveEvent
+import gg.grounds.notifications.outbox.RecordingNotificationLiveEventPublisher
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
 import io.restassured.RestAssured.given
@@ -28,6 +29,8 @@ class NotificationResourceTest {
 
     @Inject lateinit var liveBroadcaster: NotificationLiveBroadcaster
 
+    @Inject lateinit var liveEventPublisher: RecordingNotificationLiveEventPublisher
+
     @BeforeEach
     fun resetDatabase() {
         dataSource.connection.use { connection ->
@@ -44,6 +47,7 @@ class NotificationResourceTest {
             }
         }
         playerResolver.clear()
+        liveEventPublisher.reset()
     }
 
     @Test
@@ -63,6 +67,7 @@ class NotificationResourceTest {
         assertRowCount("notifications", 1)
         assertRowCount("notification_recipients", 1)
         assertWorkflowStatus("open")
+        assertEquals(emptyList<NotificationLiveEvent>(), liveEventPublisher.events)
     }
 
     @Test
@@ -232,6 +237,8 @@ class NotificationResourceTest {
     fun markNotificationReadSetsReadAtForAuthenticatedRecipient() {
         val token = seedChannelClient(channel = "api", scopes = listOf("notifications:write"))
         val notificationId = postNotificationEvent(token, "event-read-1", "user-alpha")
+        clearOutbox()
+        liveEventPublisher.reset()
 
         given()
             .contentType("application/json")
@@ -248,6 +255,36 @@ class NotificationResourceTest {
             .body("items.size()", equalTo(1))
             .body("items[0].id", equalTo(notificationId))
             .body("items[0].readAt", notNullValue())
+
+        val event = liveEventPublisher.events.single()
+        assertEquals("notifications.changed", event.type)
+        assertEquals("user-alpha", event.userId)
+        assertEquals(notificationId, event.notificationId)
+        assertEquals("read", event.reason)
+    }
+
+    @Test
+    @TestSecurity(user = "user-alpha")
+    fun markNotificationReadSucceedsWhenLivePublishFails() {
+        val token = seedChannelClient(channel = "api", scopes = listOf("notifications:write"))
+        val notificationId = postNotificationEvent(token, "event-read-publish-fails-1", "user-alpha")
+        clearOutbox()
+        liveEventPublisher.reset()
+        liveEventPublisher.publishException = IllegalStateException("nats unavailable")
+
+        given()
+            .contentType("application/json")
+            .`when`()
+            .post("/v1/notifications/$notificationId/read")
+            .then()
+            .statusCode(204)
+
+        given()
+            .`when`()
+            .get("/v1/notifications")
+            .then()
+            .statusCode(200)
+            .body("items[0].readAt", notNullValue())
     }
 
     @Test
@@ -255,6 +292,8 @@ class NotificationResourceTest {
     fun markNotificationUnreadClearsReadAtForAuthenticatedRecipient() {
         val token = seedChannelClient(channel = "api", scopes = listOf("notifications:write"))
         val notificationId = postNotificationEvent(token, "event-unread-1", "user-alpha")
+        clearOutbox()
+        liveEventPublisher.reset()
 
         given()
             .contentType("application/json")
@@ -277,6 +316,12 @@ class NotificationResourceTest {
             .body("items.size()", equalTo(1))
             .body("items[0].id", equalTo(notificationId))
             .body("items[0].readAt", nullValue())
+
+        val event = liveEventPublisher.events.last()
+        assertEquals("notifications.changed", event.type)
+        assertEquals("user-alpha", event.userId)
+        assertEquals(notificationId, event.notificationId)
+        assertEquals("unread", event.reason)
     }
 
     @Test
@@ -562,6 +607,14 @@ class NotificationResourceTest {
                 }
         }
         return token
+    }
+
+    private fun clearOutbox() {
+        dataSource.connection.use { connection ->
+            connection.createStatement().use { statement ->
+                statement.executeUpdate("DELETE FROM notification_outbox")
+            }
+        }
     }
 
     private fun hashToken(token: String): String {
