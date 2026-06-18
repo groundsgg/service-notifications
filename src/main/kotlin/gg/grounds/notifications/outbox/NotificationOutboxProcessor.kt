@@ -21,9 +21,7 @@ class NotificationOutboxProcessor(
             val previousAutoCommit = connection.autoCommit
             connection.autoCommit = false
             try {
-                claimPendingEvents(connection).forEach { event ->
-                    processEvent(connection, event)
-                }
+                claimPendingEvents(connection).forEach { event -> processEvent(connection, event) }
                 connection.commit()
             } catch (exception: Exception) {
                 connection.rollback()
@@ -34,33 +32,26 @@ class NotificationOutboxProcessor(
         }
     }
 
-    private fun processEvent(
-        connection: Connection,
-        event: OutboxEvent,
-    ) {
+    private fun processEvent(connection: Connection, event: OutboxEvent) {
         val savepoint = connection.setSavepoint()
         try {
             when (event.eventType) {
                 "notification.created" -> processNotificationCreated(connection, event)
                 else -> {
-                    // Unknown event types are treated as handled so a producer bug cannot keep the
-                    // oldest outbox rows cycling forever.
                     LOG.warnf(
-                        "Skipping unknown notification outbox event type (id=%s, eventType=%s)",
+                        "Rejecting unknown notification outbox event type (id=%s, eventType=%s)",
                         event.id,
                         event.eventType,
                     )
-                    markProcessed(connection, event.id)
+                    throw IllegalArgumentException(
+                        "Unsupported notification outbox event type: ${event.eventType}"
+                    )
                 }
             }
             connection.releaseSavepoint(savepoint)
         } catch (exception: Exception) {
             connection.rollback(savepoint)
-            markRetry(
-                connection,
-                event,
-                exception.message ?: exception::class.java.simpleName,
-            )
+            markRetry(connection, event, exception.message ?: exception::class.java.simpleName)
         }
     }
 
@@ -85,7 +76,8 @@ class NotificationOutboxProcessor(
                                 OutboxEvent(
                                     id = resultSet.getObject("id", UUID::class.java),
                                     eventType = resultSet.getString("event_type"),
-                                    aggregateId = resultSet.getObject("aggregate_id", UUID::class.java),
+                                    aggregateId =
+                                        resultSet.getObject("aggregate_id", UUID::class.java),
                                     attempts = resultSet.getInt("attempts"),
                                 )
                             )
@@ -94,10 +86,7 @@ class NotificationOutboxProcessor(
                 }
             }
 
-    private fun processNotificationCreated(
-        connection: Connection,
-        event: OutboxEvent,
-    ) {
+    private fun processNotificationCreated(connection: Connection, event: OutboxEvent) {
         var failureMessage: String? = null
         loadRecipients(connection, event.aggregateId).forEach { userId ->
             val liveEvent =
@@ -112,8 +101,7 @@ class NotificationOutboxProcessor(
                 try {
                     liveEventPublisher.publish(liveEvent)
                 } catch (exception: Exception) {
-                    failureMessage =
-                        exception.message ?: exception::class.java.simpleName
+                    failureMessage = exception.message ?: exception::class.java.simpleName
                     false
                 }
             if (!accepted && failureMessage == null) {
@@ -130,10 +118,7 @@ class NotificationOutboxProcessor(
         }
     }
 
-    private fun loadRecipients(
-        connection: Connection,
-        notificationId: UUID,
-    ): List<String> =
+    private fun loadRecipients(connection: Connection, notificationId: UUID): List<String> =
         connection
             .prepareStatement(
                 """
@@ -155,10 +140,7 @@ class NotificationOutboxProcessor(
                 }
             }
 
-    private fun markProcessed(
-        connection: Connection,
-        eventId: UUID,
-    ) {
+    private fun markProcessed(connection: Connection, eventId: UUID) {
         connection
             .prepareStatement(
                 """
@@ -174,11 +156,7 @@ class NotificationOutboxProcessor(
             }
     }
 
-    private fun markRetry(
-        connection: Connection,
-        event: OutboxEvent,
-        failureMessage: String,
-    ) {
+    private fun markRetry(connection: Connection, event: OutboxEvent, failureMessage: String) {
         val nextAttempts = event.attempts + 1
         // Rows become a dead-letter after MAX_ATTEMPTS. Operators can inspect last_error and reset
         // status/available_at if a live fanout outage needs to be replayed manually.

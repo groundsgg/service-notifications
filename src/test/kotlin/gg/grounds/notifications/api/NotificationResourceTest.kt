@@ -1,5 +1,6 @@
 package gg.grounds.notifications.api
 
+import com.fasterxml.jackson.databind.ObjectMapper
 import gg.grounds.notifications.channel.InMemoryMinecraftPlayerResolver
 import gg.grounds.notifications.live.NotificationLiveBroadcaster
 import gg.grounds.notifications.live.NotificationLiveEvent
@@ -30,6 +31,8 @@ class NotificationResourceTest {
     @Inject lateinit var liveBroadcaster: NotificationLiveBroadcaster
 
     @Inject lateinit var liveEventPublisher: RecordingNotificationLiveEventPublisher
+
+    @Inject lateinit var objectMapper: ObjectMapper
 
     @BeforeEach
     fun resetDatabase() {
@@ -267,7 +270,8 @@ class NotificationResourceTest {
     @TestSecurity(user = "user-alpha")
     fun markNotificationReadSucceedsWhenLivePublishFails() {
         val token = seedChannelClient(channel = "api", scopes = listOf("notifications:write"))
-        val notificationId = postNotificationEvent(token, "event-read-publish-fails-1", "user-alpha")
+        val notificationId =
+            postNotificationEvent(token, "event-read-publish-fails-1", "user-alpha")
         clearOutbox()
         liveEventPublisher.reset()
         liveEventPublisher.publishException = IllegalStateException("nats unavailable")
@@ -285,6 +289,33 @@ class NotificationResourceTest {
             .then()
             .statusCode(200)
             .body("items[0].readAt", notNullValue())
+    }
+
+    @Test
+    @TestSecurity(user = "user-live-fallback")
+    fun markNotificationReadFallsBackToLocalLiveStreamWhenLiveBusRejectsEvent() {
+        val token = seedChannelClient(channel = "api", scopes = listOf("notifications:write"))
+        val notificationId =
+            postNotificationEvent(token, "event-read-live-fallback-1", "user-live-fallback")
+        clearOutbox()
+        liveEventPublisher.reset()
+        liveEventPublisher.publishResult = false
+        val sink = RecordingSseEventSink()
+        resource.streamNotifications(sink)
+
+        given()
+            .contentType("application/json")
+            .`when`()
+            .post("/v1/notifications/$notificationId/read")
+            .then()
+            .statusCode(204)
+
+        assertEquals(1, sink.events.size)
+        assertEquals("notifications.changed", sink.events.single().getName())
+        assertEquals(
+            "read",
+            objectMapper.readTree(sink.events.single().getData().toString()).get("reason").asText(),
+        )
     }
 
     @Test

@@ -235,6 +235,34 @@ class NotificationOutboxProcessorTest {
         assertOutboxStatus(processedOutboxId, "processed", attempts = 0)
     }
 
+    @Test
+    fun unknownEventTypeIsNotMarkedProcessed() {
+        val notificationId = UUID.randomUUID()
+        val outboxId = UUID.randomUUID()
+        dataSource.connection.use { connection ->
+            seedNotification(connection, notificationId, "outbox-created-unknown-1")
+            connection
+                .prepareStatement(
+                    """
+                    INSERT INTO notification_outbox
+                      (id, event_type, aggregate_id, payload, attempts, available_at)
+                    VALUES (?, 'notification.renamed', ?, '{}'::jsonb, 0, now() - interval '1 minute')
+                    """
+                        .trimIndent()
+                )
+                .use { statement ->
+                    statement.setObject(1, outboxId)
+                    statement.setObject(2, notificationId)
+                    statement.executeUpdate()
+                }
+        }
+
+        outboxProcessor.processPendingEvents()
+
+        assertOutboxStatus(outboxId, "pending", attempts = 1)
+        assertEquals(emptyList<NotificationLiveEvent>(), liveEventPublisher.events)
+    }
+
     private fun seedNotification(
         connection: Connection,
         notificationId: UUID,
@@ -280,11 +308,7 @@ class NotificationOutboxProcessorTest {
             }
     }
 
-    private fun assertOutboxStatus(
-        outboxId: UUID,
-        status: String,
-        attempts: Int,
-    ) {
+    private fun assertOutboxStatus(outboxId: UUID, status: String, attempts: Int) {
         dataSource.connection.use { connection ->
             connection
                 .prepareStatement("SELECT status, attempts FROM notification_outbox WHERE id = ?")
@@ -302,11 +326,7 @@ class NotificationOutboxProcessorTest {
         }
     }
 
-    private fun insertRecipient(
-        connection: Connection,
-        notificationId: UUID,
-        userId: String,
-    ) {
+    private fun insertRecipient(connection: Connection, notificationId: UUID, userId: String) {
         connection
             .prepareStatement(
                 """

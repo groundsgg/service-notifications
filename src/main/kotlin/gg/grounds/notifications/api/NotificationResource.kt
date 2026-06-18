@@ -172,7 +172,10 @@ class NotificationResource(
 
     private fun publishLiveEvent(event: NotificationLiveEvent) {
         try {
-            liveEventPublisher.publish(event)
+            val accepted = liveEventPublisher.publish(event)
+            if (!accepted) {
+                liveBroadcaster.publish(event)
+            }
         } catch (exception: Exception) {
             LOG.warnf(
                 exception,
@@ -181,6 +184,7 @@ class NotificationResource(
                 event.userId,
                 event.reason,
             )
+            liveBroadcaster.publish(event)
         }
     }
 

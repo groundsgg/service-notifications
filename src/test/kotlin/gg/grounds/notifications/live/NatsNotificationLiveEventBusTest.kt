@@ -5,8 +5,8 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
 import com.fasterxml.jackson.module.kotlin.registerKotlinModule
 import java.time.OffsetDateTime
 import org.junit.jupiter.api.Assertions.assertArrayEquals
-import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertDoesNotThrow
+import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
@@ -27,19 +27,14 @@ class NatsNotificationLiveEventBusTest {
         assertEquals(1, client.published.size)
         val published = client.published.single()
         assertEquals("grounds.internal.notifications.changed", published.subject)
-        assertArrayEquals(
-            objectMapper.writeValueAsBytes(event),
-            published.payload,
-        )
+        assertArrayEquals(objectMapper.writeValueAsBytes(event), published.payload)
     }
 
     @Test
     fun `publish does not propagate NATS client failures`() {
         val bus = NatsNotificationLiveEventBus.ForTests(objectMapper, FailingNatsClient())
 
-        assertDoesNotThrow {
-            assertFalse(bus.publish(notificationLiveEvent()))
-        }
+        assertDoesNotThrow { assertFalse(bus.publish(notificationLiveEvent())) }
     }
 
     @Test
@@ -52,9 +47,7 @@ class NatsNotificationLiveEventBusTest {
         assertEquals(1, factory.attempts)
 
         bus.connectIfNeeded()
-        assertDoesNotThrow {
-            assertTrue(bus.publish(event))
-        }
+        assertDoesNotThrow { assertTrue(bus.publish(event)) }
 
         assertEquals(2, factory.attempts)
         assertEquals(1, client.published.size)
@@ -82,12 +75,8 @@ class NatsNotificationLiveEventBusTest {
 
         assertEquals(1, factory.attempts)
 
-        assertDoesNotThrow {
-            assertFalse(bus.publish(notificationLiveEvent()))
-        }
-        assertDoesNotThrow {
-            assertFalse(bus.publish(notificationLiveEvent()))
-        }
+        assertDoesNotThrow { assertFalse(bus.publish(notificationLiveEvent())) }
+        assertDoesNotThrow { assertFalse(bus.publish(notificationLiveEvent())) }
 
         assertEquals(1, factory.attempts)
     }
@@ -97,9 +86,7 @@ class NatsNotificationLiveEventBusTest {
         val factory = DisabledNatsClientFactory()
         val bus = NatsNotificationLiveEventBus.ForTests(objectMapper, factory)
 
-        assertDoesNotThrow {
-            assertFalse(bus.publish(notificationLiveEvent()))
-        }
+        assertDoesNotThrow { assertFalse(bus.publish(notificationLiveEvent())) }
 
         assertEquals(0, factory.attempts)
     }
@@ -135,9 +122,7 @@ class NatsNotificationLiveEventBusTest {
 
         bus.close()
         bus.connectIfNeeded()
-        assertDoesNotThrow {
-            assertFalse(bus.publish(notificationLiveEvent()))
-        }
+        assertDoesNotThrow { assertFalse(bus.publish(notificationLiveEvent())) }
 
         assertEquals(1, factory.attempts)
         assertEquals(1, client.closeCount)
@@ -154,9 +139,8 @@ class NatsNotificationLiveEventBusTest {
             occurredAt = OffsetDateTime.parse("2026-06-02T12:34:56.789Z"),
         )
 
-    private class RecordingNatsClient(
-        override val isActive: Boolean = true,
-    ) : NatsNotificationLiveEventBus.NatsClient {
+    private class RecordingNatsClient(override val isActive: Boolean = true) :
+        NatsNotificationLiveEventBus.NatsClient {
         val published = mutableListOf<PublishedMessage>()
         var closeCount = 0
             private set
@@ -181,7 +165,7 @@ class NatsNotificationLiveEventBusTest {
     }
 
     private class FailsOnceNatsClientFactory(
-        private val client: NatsNotificationLiveEventBus.NatsClient,
+        private val client: NatsNotificationLiveEventBus.NatsClient
     ) : NatsNotificationLiveEventBus.NatsClientFactory {
         override val enabled = true
 
@@ -222,7 +206,7 @@ class NatsNotificationLiveEventBusTest {
     }
 
     private class SequenceNatsClientFactory(
-        private vararg val clients: NatsNotificationLiveEventBus.NatsClient,
+        private vararg val clients: NatsNotificationLiveEventBus.NatsClient
     ) : NatsNotificationLiveEventBus.NatsClientFactory {
         override val enabled = true
 

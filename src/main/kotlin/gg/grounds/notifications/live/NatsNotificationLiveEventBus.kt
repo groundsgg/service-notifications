@@ -52,10 +52,8 @@ class NatsNotificationLiveEventBus(
         fun create(): NatsClient?
     }
 
-    class ForTests(
-        objectMapper: ObjectMapper,
-        clientFactory: NatsClientFactory,
-    ) : NotificationLiveEventPublisher {
+    class ForTests(objectMapper: ObjectMapper, clientFactory: NatsClientFactory) :
+        NotificationLiveEventPublisher {
         constructor(
             objectMapper: ObjectMapper,
             client: NatsClient,
@@ -160,9 +158,7 @@ class NatsNotificationLiveEventBus(
         }
     }
 
-    private class FixedNatsClientFactory(
-        private val client: NatsClient,
-    ) : NatsClientFactory {
+    private class FixedNatsClientFactory(private val client: NatsClient) : NatsClientFactory {
         override val enabled = true
 
         override fun create(): NatsClient = client

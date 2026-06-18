@@ -78,7 +78,7 @@ class ProjectInviteActionResourceTest {
     @Test
     @TestSecurity(user = "user-alpha")
     fun projectInviteAcceptSucceedsWhenLivePublishFails() {
-        val notificationId = createNotificationWithInvite("invite-live-publish-fails")
+        val notificationId = createNotificationWithInvite("invite-success-live-publish-fails")
         clearOutbox()
         liveEventPublisher.reset()
         liveEventPublisher.publishException = IllegalStateException("nats unavailable")

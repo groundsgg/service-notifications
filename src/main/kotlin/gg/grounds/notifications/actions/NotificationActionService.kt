@@ -2,6 +2,7 @@ package gg.grounds.notifications.actions
 
 import gg.grounds.notifications.core.ActionExecutionResponse
 import gg.grounds.notifications.db.NotificationRepository
+import gg.grounds.notifications.live.NotificationLiveBroadcaster
 import gg.grounds.notifications.live.NotificationLiveEvent
 import gg.grounds.notifications.live.NotificationLiveEventPublisher
 import jakarta.enterprise.context.ApplicationScoped
@@ -14,6 +15,7 @@ class NotificationActionService(
     private val notificationRepository: NotificationRepository,
     private val projectInviteActionAdapter: ProjectInviteActionAdapter,
     private val clusterResumeActionAdapter: ClusterResumeActionAdapter,
+    private val liveBroadcaster: NotificationLiveBroadcaster,
     private val liveEventPublisher: NotificationLiveEventPublisher,
 ) {
     fun execute(
@@ -50,7 +52,10 @@ class NotificationActionService(
 
     private fun publishLiveEvent(event: NotificationLiveEvent) {
         try {
-            liveEventPublisher.publish(event)
+            val accepted = liveEventPublisher.publish(event)
+            if (!accepted) {
+                liveBroadcaster.publish(event)
+            }
         } catch (exception: Exception) {
             LOG.warnf(
                 exception,
@@ -59,6 +64,7 @@ class NotificationActionService(
                 event.userId,
                 event.reason,
             )
+            liveBroadcaster.publish(event)
         }
     }
 
