@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.1](https://github.com/groundsgg/service-notifications/compare/service-notifications-v0.6.0...service-notifications-v0.6.1) (2026-06-18)
+
+
+### Bug Fixes
+
+* support nats token files ([#18](https://github.com/groundsgg/service-notifications/issues/18)) ([36113e8](https://github.com/groundsgg/service-notifications/commit/36113e8b578ea2910cf1520c9e42ebe2e46de6a2))
+
 ## [0.6.0](https://github.com/groundsgg/service-notifications/compare/service-notifications-v0.5.0...service-notifications-v0.6.0) (2026-06-18)
 
 
