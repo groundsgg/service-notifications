@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.0](https://github.com/groundsgg/service-notifications/compare/service-notifications-v0.5.0...service-notifications-v0.6.0) (2026-06-18)
+
+
+### Features
+
+* make notifications live fanout HA with NATS ([#16](https://github.com/groundsgg/service-notifications/issues/16)) ([5dfb398](https://github.com/groundsgg/service-notifications/commit/5dfb398b59a6141c036194686c96437aa2d13072))
+
 ## [0.5.0](https://github.com/groundsgg/service-notifications/compare/service-notifications-v0.4.1...service-notifications-v0.5.0) (2026-06-04)
 
 
