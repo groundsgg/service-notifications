@@ -7,6 +7,8 @@ import java.time.OffsetDateTime
 import org.junit.jupiter.api.Assertions.assertArrayEquals
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertDoesNotThrow
+import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
 class NatsNotificationLiveEventBusTest {
@@ -19,8 +21,9 @@ class NatsNotificationLiveEventBusTest {
         val bus = NatsNotificationLiveEventBus.ForTests(objectMapper, client)
         val event = notificationLiveEvent()
 
-        bus.publish(event)
+        val accepted = bus.publish(event)
 
+        assertTrue(accepted)
         assertEquals(1, client.published.size)
         val published = client.published.single()
         assertEquals("grounds.internal.notifications.changed", published.subject)
@@ -34,7 +37,9 @@ class NatsNotificationLiveEventBusTest {
     fun `publish does not propagate NATS client failures`() {
         val bus = NatsNotificationLiveEventBus.ForTests(objectMapper, FailingNatsClient())
 
-        assertDoesNotThrow { bus.publish(notificationLiveEvent()) }
+        assertDoesNotThrow {
+            assertFalse(bus.publish(notificationLiveEvent()))
+        }
     }
 
     @Test
@@ -47,7 +52,9 @@ class NatsNotificationLiveEventBusTest {
         assertEquals(1, factory.attempts)
 
         bus.connectIfNeeded()
-        assertDoesNotThrow { bus.publish(event) }
+        assertDoesNotThrow {
+            assertTrue(bus.publish(event))
+        }
 
         assertEquals(2, factory.attempts)
         assertEquals(1, client.published.size)
@@ -75,10 +82,26 @@ class NatsNotificationLiveEventBusTest {
 
         assertEquals(1, factory.attempts)
 
-        assertDoesNotThrow { bus.publish(notificationLiveEvent()) }
-        assertDoesNotThrow { bus.publish(notificationLiveEvent()) }
+        assertDoesNotThrow {
+            assertFalse(bus.publish(notificationLiveEvent()))
+        }
+        assertDoesNotThrow {
+            assertFalse(bus.publish(notificationLiveEvent()))
+        }
 
         assertEquals(1, factory.attempts)
+    }
+
+    @Test
+    fun `publish returns false when NATS client factory is disabled`() {
+        val factory = DisabledNatsClientFactory()
+        val bus = NatsNotificationLiveEventBus.ForTests(objectMapper, factory)
+
+        assertDoesNotThrow {
+            assertFalse(bus.publish(notificationLiveEvent()))
+        }
+
+        assertEquals(0, factory.attempts)
     }
 
     @Test
@@ -92,8 +115,9 @@ class NatsNotificationLiveEventBusTest {
         assertEquals(1, factory.attempts)
 
         bus.connectIfNeeded()
-        bus.publish(event)
+        val accepted = bus.publish(event)
 
+        assertTrue(accepted)
         assertEquals(2, factory.attempts)
         assertEquals(1, inactiveClient.closeCount)
         assertEquals(0, inactiveClient.published.size)
@@ -111,7 +135,9 @@ class NatsNotificationLiveEventBusTest {
 
         bus.close()
         bus.connectIfNeeded()
-        assertDoesNotThrow { bus.publish(notificationLiveEvent()) }
+        assertDoesNotThrow {
+            assertFalse(bus.publish(notificationLiveEvent()))
+        }
 
         assertEquals(1, factory.attempts)
         assertEquals(1, client.closeCount)
@@ -180,6 +206,18 @@ class NatsNotificationLiveEventBusTest {
         override fun create(): NatsNotificationLiveEventBus.NatsClient? {
             attempts += 1
             throw IllegalStateException("nats unavailable")
+        }
+    }
+
+    private class DisabledNatsClientFactory : NatsNotificationLiveEventBus.NatsClientFactory {
+        override val enabled = false
+
+        var attempts = 0
+            private set
+
+        override fun create(): NatsNotificationLiveEventBus.NatsClient? {
+            attempts += 1
+            return null
         }
     }
 

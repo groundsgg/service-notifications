@@ -26,9 +26,7 @@ class NatsNotificationLiveEventBus(
             JnatsClientFactory(objectMapper, broadcaster, natsUrl, natsToken),
         )
 
-    override fun publish(event: NotificationLiveEvent) {
-        publisher.publish(event)
-    }
+    override fun publish(event: NotificationLiveEvent): Boolean = publisher.publish(event)
 
     @Scheduled(every = "10s")
     fun reconnect() {
@@ -65,9 +63,7 @@ class NatsNotificationLiveEventBus(
 
         private val publisher = RecoveringNatsPublisher(objectMapper, clientFactory)
 
-        override fun publish(event: NotificationLiveEvent) {
-            publisher.publish(event)
-        }
+        override fun publish(event: NotificationLiveEvent): Boolean = publisher.publish(event)
 
         fun connectIfNeeded() {
             publisher.connectIfNeeded(force = true)
@@ -91,13 +87,15 @@ class NatsNotificationLiveEventBus(
             connectIfNeeded(force = true)
         }
 
-        override fun publish(event: NotificationLiveEvent) {
-            val natsClient = connectIfNeeded(force = false) ?: return
+        override fun publish(event: NotificationLiveEvent): Boolean {
+            val natsClient = connectIfNeeded(force = false) ?: return false
             try {
                 natsClient.publish(SUBJECT, objectMapper.writeValueAsBytes(event))
+                return true
             } catch (exception: Exception) {
                 LOG.warnf(exception, "Failed to publish notification live event to NATS")
                 disconnectIfCurrent(natsClient)
+                return false
             }
         }
 

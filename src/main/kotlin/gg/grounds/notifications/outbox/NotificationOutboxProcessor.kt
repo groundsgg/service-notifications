@@ -22,19 +22,7 @@ class NotificationOutboxProcessor(
             connection.autoCommit = false
             try {
                 claimPendingEvents(connection).forEach { event ->
-                    when (event.eventType) {
-                        "notification.created" -> processNotificationCreated(connection, event)
-                        else -> {
-                            // Unknown event types are treated as handled so a producer bug cannot
-                            // keep the oldest outbox rows cycling forever.
-                            LOG.warnf(
-                                "Skipping unknown notification outbox event type (id=%s, eventType=%s)",
-                                event.id,
-                                event.eventType,
-                            )
-                            markProcessed(connection, event.id)
-                        }
-                    }
+                    processEvent(connection, event)
                 }
                 connection.commit()
             } catch (exception: Exception) {
@@ -43,6 +31,36 @@ class NotificationOutboxProcessor(
             } finally {
                 connection.autoCommit = previousAutoCommit
             }
+        }
+    }
+
+    private fun processEvent(
+        connection: Connection,
+        event: OutboxEvent,
+    ) {
+        val savepoint = connection.setSavepoint()
+        try {
+            when (event.eventType) {
+                "notification.created" -> processNotificationCreated(connection, event)
+                else -> {
+                    // Unknown event types are treated as handled so a producer bug cannot keep the
+                    // oldest outbox rows cycling forever.
+                    LOG.warnf(
+                        "Skipping unknown notification outbox event type (id=%s, eventType=%s)",
+                        event.id,
+                        event.eventType,
+                    )
+                    markProcessed(connection, event.id)
+                }
+            }
+            connection.releaseSavepoint(savepoint)
+        } catch (exception: Exception) {
+            connection.rollback(savepoint)
+            markRetry(
+                connection,
+                event,
+                exception.message ?: exception::class.java.simpleName,
+            )
         }
     }
 
@@ -68,6 +86,7 @@ class NotificationOutboxProcessor(
                                     id = resultSet.getObject("id", UUID::class.java),
                                     eventType = resultSet.getString("event_type"),
                                     aggregateId = resultSet.getObject("aggregate_id", UUID::class.java),
+                                    attempts = resultSet.getInt("attempts"),
                                 )
                             )
                         }
@@ -79,8 +98,9 @@ class NotificationOutboxProcessor(
         connection: Connection,
         event: OutboxEvent,
     ) {
+        var failureMessage: String? = null
         loadRecipients(connection, event.aggregateId).forEach { userId ->
-            liveEventPublisher.publish(
+            val liveEvent =
                 NotificationLiveEvent(
                     type = "notifications.changed",
                     userId = userId,
@@ -88,9 +108,26 @@ class NotificationOutboxProcessor(
                     reason = "created",
                     occurredAt = OffsetDateTime.now(),
                 )
-            )
+            val accepted =
+                try {
+                    liveEventPublisher.publish(liveEvent)
+                } catch (exception: Exception) {
+                    failureMessage =
+                        exception.message ?: exception::class.java.simpleName
+                    false
+                }
+            if (!accepted && failureMessage == null) {
+                failureMessage = "Notification live event publisher did not accept event"
+            }
+            // Retrying after partial fanout can duplicate earlier live change events.
+            // These events are idempotent because clients refetch notification state.
         }
-        markProcessed(connection, event.id)
+        val finalFailureMessage = failureMessage
+        if (finalFailureMessage == null) {
+            markProcessed(connection, event.id)
+        } else {
+            markRetry(connection, event, finalFailureMessage)
+        }
     }
 
     private fun loadRecipients(
@@ -137,11 +174,46 @@ class NotificationOutboxProcessor(
             }
     }
 
+    private fun markRetry(
+        connection: Connection,
+        event: OutboxEvent,
+        failureMessage: String,
+    ) {
+        val nextAttempts = event.attempts + 1
+        // Rows become a dead-letter after MAX_ATTEMPTS. Operators can inspect last_error and reset
+        // status/available_at if a live fanout outage needs to be replayed manually.
+        connection
+            .prepareStatement(
+                """
+                UPDATE notification_outbox
+                SET attempts = attempts + 1,
+                    last_error = ?,
+                    available_at = now() + (? * interval '1 second'),
+                    status = CASE WHEN attempts + 1 >= ? THEN 'failed' ELSE 'pending' END
+                WHERE id = ?
+                """
+                    .trimIndent()
+            )
+            .use { statement ->
+                statement.setString(1, failureMessage)
+                statement.setInt(2, backoffSeconds(nextAttempts))
+                statement.setInt(3, MAX_ATTEMPTS)
+                statement.setObject(4, event.id)
+                statement.executeUpdate()
+            }
+    }
+
     private data class OutboxEvent(
         val id: UUID,
         val eventType: String,
         val aggregateId: UUID,
+        val attempts: Int,
     )
 }
+
+private const val MAX_ATTEMPTS = 5
+
+private fun backoffSeconds(nextAttempts: Int): Int =
+    minOf(300, 5 * (1 shl (nextAttempts - 1).coerceAtLeast(0)))
 
 private val LOG: Logger = Logger.getLogger(NotificationOutboxProcessor::class.java)

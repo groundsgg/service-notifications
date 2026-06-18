@@ -11,12 +11,23 @@ import jakarta.enterprise.inject.Alternative
 @ApplicationScoped
 class RecordingNotificationLiveEventPublisher : NotificationLiveEventPublisher {
     val events: MutableList<NotificationLiveEvent> = mutableListOf()
+    var publishResult: Boolean = true
+    var publishException: RuntimeException? = null
+    val rejectedUserIds: MutableSet<String> = mutableSetOf()
 
-    override fun publish(event: NotificationLiveEvent) {
+    override fun publish(event: NotificationLiveEvent): Boolean {
         events.add(event)
+        publishException?.let { throw it }
+        if (event.userId in rejectedUserIds) {
+            return false
+        }
+        return publishResult
     }
 
     fun reset() {
         events.clear()
+        publishResult = true
+        publishException = null
+        rejectedUserIds.clear()
     }
 }

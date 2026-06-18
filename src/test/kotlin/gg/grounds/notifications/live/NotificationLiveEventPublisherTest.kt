@@ -2,6 +2,7 @@ package gg.grounds.notifications.live
 
 import java.time.OffsetDateTime
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
 class NotificationLiveEventPublisherTest {
@@ -17,16 +18,18 @@ class NotificationLiveEventPublisherTest {
                 occurredAt = OffsetDateTime.parse("2026-06-02T12:34:56.789Z"),
             )
 
-        publisher.publish(event)
+        val accepted = publisher.publish(event)
 
+        assertTrue(accepted)
         assertEquals(listOf(event), publisher.events)
     }
 
     private class RecordingNotificationLiveEventPublisher : NotificationLiveEventPublisher {
         val events = mutableListOf<NotificationLiveEvent>()
 
-        override fun publish(event: NotificationLiveEvent) {
+        override fun publish(event: NotificationLiveEvent): Boolean {
             events += event
+            return true
         }
     }
 }
