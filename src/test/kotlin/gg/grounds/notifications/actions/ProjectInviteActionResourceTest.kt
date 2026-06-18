@@ -1,6 +1,7 @@
 package gg.grounds.notifications.actions
 
 import com.sun.net.httpserver.HttpServer
+import gg.grounds.notifications.outbox.RecordingNotificationLiveEventPublisher
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
 import io.quarkus.test.junit.QuarkusTest
@@ -30,6 +31,8 @@ import org.junit.jupiter.api.Test
 class ProjectInviteActionResourceTest {
     @Inject lateinit var dataSource: DataSource
 
+    @Inject lateinit var liveEventPublisher: RecordingNotificationLiveEventPublisher
+
     @BeforeEach
     fun resetDatabase() {
         dataSource.connection.use { connection ->
@@ -44,15 +47,44 @@ class ProjectInviteActionResourceTest {
                 statement.executeUpdate("DELETE FROM notification_channel_clients")
             }
         }
+        liveEventPublisher.reset()
     }
 
     @Test
     @TestSecurity(user = "user-alpha")
     fun projectInviteAcceptStoresSucceededResultWhenForgeAcceptsAction() {
         val notificationId = createNotificationWithInvite("invite-success")
+        clearOutbox()
+        liveEventPublisher.reset()
 
         given()
             .header("X-Request-Id", "request-success-1")
+            .contentType("application/json")
+            .body("{}")
+            .post("/v1/notifications/$notificationId/actions/project_invite.accept")
+            .then()
+            .statusCode(200)
+            .body("status", equalTo("succeeded"))
+
+        assertActionResultStatus(notificationId, "succeeded")
+        assertRecipientReadAtPresent(notificationId)
+        val event = liveEventPublisher.events.single()
+        assertEquals("notifications.changed", event.type)
+        assertEquals("user-alpha", event.userId)
+        assertEquals(notificationId, event.notificationId)
+        assertEquals("action", event.reason)
+    }
+
+    @Test
+    @TestSecurity(user = "user-alpha")
+    fun projectInviteAcceptSucceedsWhenLivePublishFails() {
+        val notificationId = createNotificationWithInvite("invite-success-live-publish-fails")
+        clearOutbox()
+        liveEventPublisher.reset()
+        liveEventPublisher.publishException = IllegalStateException("nats unavailable")
+
+        given()
+            .header("X-Request-Id", "request-live-publish-fails-1")
             .contentType("application/json")
             .body("{}")
             .post("/v1/notifications/$notificationId/actions/project_invite.accept")
@@ -332,6 +364,14 @@ class ProjectInviteActionResourceTest {
                         resultSet.close()
                     }
                 }
+        }
+    }
+
+    private fun clearOutbox() {
+        dataSource.connection.use { connection ->
+            connection.createStatement().use { statement ->
+                statement.executeUpdate("DELETE FROM notification_outbox")
+            }
         }
     }
 

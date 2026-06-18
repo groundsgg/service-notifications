@@ -11,6 +11,7 @@ import gg.grounds.notifications.db.ChannelClient
 import gg.grounds.notifications.db.NotificationRepository
 import gg.grounds.notifications.live.NotificationLiveBroadcaster
 import gg.grounds.notifications.live.NotificationLiveEvent
+import gg.grounds.notifications.live.NotificationLiveEventPublisher
 import io.quarkus.security.Authenticated
 import io.quarkus.security.identity.SecurityIdentity
 import jakarta.ws.rs.BadRequestException
@@ -28,7 +29,9 @@ import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
 import jakarta.ws.rs.core.UriInfo
 import jakarta.ws.rs.sse.SseEventSink
+import java.time.OffsetDateTime
 import java.util.UUID
+import org.jboss.logging.Logger
 
 @Path("/v1")
 @Produces(MediaType.APPLICATION_JSON)
@@ -39,6 +42,7 @@ class NotificationResource(
     private val webUserResolver: WebUserResolver,
     private val actionService: NotificationActionService,
     private val liveBroadcaster: NotificationLiveBroadcaster,
+    private val liveEventPublisher: NotificationLiveEventPublisher,
     private val identity: SecurityIdentity,
 ) {
     @POST
@@ -55,19 +59,6 @@ class NotificationResource(
             )
         requireProducerScope(client, request)
         val response = notificationRepository.createEvent(request)
-        if (response.created) {
-            request.recipients.forEach { recipient ->
-                liveBroadcaster.publish(
-                    NotificationLiveEvent(
-                        type = "notifications.changed",
-                        userId = recipient.userId,
-                        notificationId = response.id.toString(),
-                        reason = "created",
-                        occurredAt = java.time.OffsetDateTime.now(),
-                    )
-                )
-            }
-        }
         val status = if (response.created) Response.Status.CREATED else Response.Status.OK
         return Response.status(status)
             .entity(NotificationEventResponse(response.id, response.created))
@@ -101,13 +92,13 @@ class NotificationResource(
         if (!notificationRepository.markRecipientRead(id, userId)) {
             throw NotFoundException("Notification recipient was not found")
         }
-        liveBroadcaster.publish(
+        publishLiveEvent(
             NotificationLiveEvent(
                 type = "notifications.changed",
                 userId = userId,
                 notificationId = id.toString(),
                 reason = "read",
-                occurredAt = java.time.OffsetDateTime.now(),
+                occurredAt = OffsetDateTime.now(),
             )
         )
         return Response.noContent().build()
@@ -122,13 +113,13 @@ class NotificationResource(
         if (!notificationRepository.markRecipientUnread(id, userId)) {
             throw NotFoundException("Notification recipient was not found")
         }
-        liveBroadcaster.publish(
+        publishLiveEvent(
             NotificationLiveEvent(
                 type = "notifications.changed",
                 userId = userId,
                 notificationId = id.toString(),
                 reason = "unread",
-                occurredAt = java.time.OffsetDateTime.now(),
+                occurredAt = OffsetDateTime.now(),
             )
         )
         return Response.noContent().build()
@@ -177,5 +168,27 @@ class NotificationResource(
         if (request.scope.type != expectedType || request.scope.id != expectedId) {
             throw ForbiddenException("Channel client is not authorized for notification scope")
         }
+    }
+
+    private fun publishLiveEvent(event: NotificationLiveEvent) {
+        try {
+            val accepted = liveEventPublisher.publish(event)
+            if (!accepted) {
+                liveBroadcaster.publish(event)
+            }
+        } catch (exception: Exception) {
+            LOG.warnf(
+                exception,
+                "Failed to publish best-effort notification live event (notificationId=%s, userId=%s, reason=%s)",
+                event.notificationId,
+                event.userId,
+                event.reason,
+            )
+            liveBroadcaster.publish(event)
+        }
+    }
+
+    companion object {
+        private val LOG: Logger = Logger.getLogger(NotificationResource::class.java)
     }
 }
