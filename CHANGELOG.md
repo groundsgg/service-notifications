@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.2](https://github.com/groundsgg/service-notifications/compare/service-notifications-v0.6.1...service-notifications-v0.6.2) (2026-07-28)
+
+
+### Bug Fixes
+
+* redact NATS credentials from connection logs ([#20](https://github.com/groundsgg/service-notifications/issues/20)) ([b6511ea](https://github.com/groundsgg/service-notifications/commit/b6511ea49c9e81a03f00f12bb8bc6d9d91f5bd96))
+
 ## [0.6.1](https://github.com/groundsgg/service-notifications/compare/service-notifications-v0.6.0...service-notifications-v0.6.1) (2026-06-18)
 
 
