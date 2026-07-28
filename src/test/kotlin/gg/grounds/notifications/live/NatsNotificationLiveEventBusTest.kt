@@ -3,11 +3,17 @@ package gg.grounds.notifications.live
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
 import com.fasterxml.jackson.module.kotlin.registerKotlinModule
+import java.io.IOException
 import java.time.OffsetDateTime
+import java.util.logging.Handler
+import java.util.logging.Level
+import java.util.logging.LogRecord
+import java.util.logging.Logger
 import org.junit.jupiter.api.Assertions.assertArrayEquals
 import org.junit.jupiter.api.Assertions.assertDoesNotThrow
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
@@ -79,6 +85,31 @@ class NatsNotificationLiveEventBusTest {
         assertDoesNotThrow { assertFalse(bus.publish(notificationLiveEvent())) }
 
         assertEquals(1, factory.attempts)
+    }
+
+    @Test
+    fun `connection failure log does not expose NATS credentials`() {
+        val credential = "test-nats-password"
+        val records =
+            captureLogs(NatsNotificationLiveEventBus::class.java.name) {
+                NatsNotificationLiveEventBus.ForTests(
+                    objectMapper,
+                    CredentialBearingFailureFactory(credential),
+                )
+            }
+
+        val failure =
+            records.single {
+                it.message.startsWith("Failed to initialize notification NATS live event bus")
+            }
+        val renderedFailure = failure.message + (failure.thrown?.message ?: "")
+        assertFalse(renderedFailure.contains(credential))
+        assertNull(failure.thrown)
+        assertEquals(Level.SEVERE, failure.level)
+        assertEquals(
+            "Failed to initialize notification NATS live event bus (reason=IOException)",
+            failure.message,
+        )
     }
 
     @Test
@@ -205,6 +236,17 @@ class NatsNotificationLiveEventBusTest {
         }
     }
 
+    private class CredentialBearingFailureFactory(private val credential: String) :
+        NatsNotificationLiveEventBus.NatsClientFactory {
+        override val enabled = true
+
+        override fun create(): NatsNotificationLiveEventBus.NatsClient? {
+            throw IOException(
+                "Unable to connect to NATS server nats://service-notifications:$credential@nats.example:4222"
+            )
+        }
+    }
+
     private class SequenceNatsClientFactory(
         private vararg val clients: NatsNotificationLiveEventBus.NatsClient
     ) : NatsNotificationLiveEventBus.NatsClientFactory {
@@ -219,4 +261,30 @@ class NatsNotificationLiveEventBusTest {
     }
 
     private data class PublishedMessage(val subject: String, val payload: ByteArray)
+
+    private fun captureLogs(loggerName: String, block: () -> Unit): List<LogRecord> {
+        val records = mutableListOf<LogRecord>()
+        val logger = Logger.getLogger(loggerName)
+        val previousLevel = logger.level
+        val handler =
+            object : Handler() {
+                override fun publish(record: LogRecord) {
+                    records += record
+                }
+
+                override fun flush() = Unit
+
+                override fun close() = Unit
+            }
+        handler.level = Level.ALL
+        logger.level = Level.ALL
+        logger.addHandler(handler)
+        return try {
+            block()
+            records
+        } finally {
+            logger.removeHandler(handler)
+            logger.level = previousLevel
+        }
+    }
 }

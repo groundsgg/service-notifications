@@ -149,7 +149,10 @@ class NatsNotificationLiveEventBus(
                     }
                 } catch (exception: Exception) {
                     lastConnectionFailureNanos = now
-                    LOG.errorf(exception, "Failed to initialize notification NATS live event bus")
+                    LOG.errorf(
+                        "Failed to initialize notification NATS live event bus (reason=%s)",
+                        exception.javaClass.simpleName,
+                    )
                     null
                 }
             }
