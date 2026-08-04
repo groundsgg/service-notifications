@@ -37,3 +37,10 @@ dependencies {
     testImplementation("io.quarkus:quarkus-test-security")
     testImplementation("io.rest-assured:rest-assured")
 }
+
+tasks.processResources {
+    val projectVersion = version.toString()
+    filesMatching("**/default_banner.txt") {
+        filter { line: String -> line.replace("@VERSION@", projectVersion) }
+    }
+}
