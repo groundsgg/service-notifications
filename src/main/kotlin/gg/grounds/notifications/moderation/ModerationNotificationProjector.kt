@@ -5,7 +5,16 @@ import gg.grounds.notifications.audience.ForgeAudienceSnapshot
 import gg.grounds.notifications.audience.RetryableForgeAudienceException
 import gg.grounds.notifications.audience.TerminalForgeAudienceException
 import jakarta.enterprise.context.ApplicationScoped
+import java.time.Duration
+import java.time.Instant
 import java.util.UUID
+
+object ModerationNotificationContent {
+    const val TYPE = "MODERATION_CASE_READY"
+    const val CATEGORY = "MODERATION"
+    const val TITLE = "Moderation case ready for review"
+    const val BODY = "A moderation case is ready for review."
+}
 
 enum class ModerationProjectionStatus {
     CREATED,
@@ -35,9 +44,11 @@ fun interface ModerationProjectionStore {
 class ModerationNotificationProjector(
     private val audienceResolver: ForgeAudienceResolver,
     private val projectionStore: ModerationProjectionStore,
+    private val metrics: ModerationNotificationMetrics? = null,
 ) : ModerationReadyEventHandler {
     override fun handle(event: ReportReadyForReviewEvent) {
-        projectionStore.findProcessedModerationEvent(event)?.let {
+        projectionStore.findProcessedModerationEvent(event)?.let { result ->
+            record(result, event)
             return
         }
         val audience =
@@ -54,6 +65,10 @@ class ModerationNotificationProjector(
                     exception,
                 )
             }
-        projectionStore.projectModerationCase(event, audience)
+        record(projectionStore.projectModerationCase(event, audience), event)
+    }
+
+    private fun record(result: ModerationProjectionResult, event: ReportReadyForReviewEvent) {
+        metrics?.recordProjection(result.status, Duration.between(event.occurredAt, Instant.now()))
     }
 }

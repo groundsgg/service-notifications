@@ -30,6 +30,8 @@ open class TerminalModerationNotificationException(message: String, cause: Throw
 interface ModerationIncomingMessage {
     val subject: String
     val data: ByteArray
+    val pendingCount: Long?
+        get() = null
 
     fun ack()
 
@@ -40,20 +42,30 @@ interface ModerationIncomingMessage {
 
 class ModerationMessageProcessor(
     private val validator: ModerationEventValidator,
+    private val metrics: ModerationNotificationMetrics? = null,
+    private val state: ModerationConsumerState? = null,
     private val handler: ModerationReadyEventHandler,
 ) {
     fun process(message: ModerationIncomingMessage) {
+        message.pendingCount?.let { pending ->
+            metrics?.updateConsumerLag(pending)
+            state?.updateLag(pending)
+        }
         try {
             val event = validator.validate(message.subject, message.data)
             handler.handle(event)
             message.ack()
         } catch (_: InvalidModerationEventException) {
+            metrics?.recordFailure(ModerationFailureReason.INVALID_EVENT)
             message.term()
         } catch (_: TerminalModerationNotificationException) {
+            metrics?.recordFailure(ModerationFailureReason.TERMINAL_PROJECTION)
             message.term()
         } catch (_: RetryableModerationNotificationException) {
+            metrics?.recordRetry(ModerationRetryReason.PROJECTION)
             message.nak()
         } catch (_: Exception) {
+            metrics?.recordRetry(ModerationRetryReason.PROJECTION)
             message.nak()
         }
     }
@@ -63,6 +75,8 @@ class ModerationMessageProcessor(
 class ModerationNotificationConsumer(
     private val objectMapper: ObjectMapper,
     private val handlers: Instance<ModerationReadyEventHandler>,
+    private val metrics: ModerationNotificationMetrics,
+    private val state: ModerationConsumerState,
     @param:ConfigProperty(
         name = "notifications.moderation-projector.enabled",
         defaultValue = "false",
@@ -161,12 +175,18 @@ class ModerationNotificationConsumer(
                 val configuration = moderationConsumerConfiguration(consumerName)
                 newConnection.jetStreamManagement().addOrUpdateConsumer(streamName, configuration)
                 val processor =
-                    ModerationMessageProcessor(ModerationEventValidator(objectMapper), handler)
+                    ModerationMessageProcessor(
+                        validator = ModerationEventValidator(objectMapper),
+                        metrics = metrics,
+                        state = state,
+                        handler = handler,
+                    )
                 val newConsumer =
                     newConnection.jetStream().getConsumerContext(streamName, consumerName).consume {
                         processor.process(JnatsIncomingMessage(it))
                     }
                 messageConsumer = newConsumer
+                state.connected()
             } catch (exception: Exception) {
                 closeCurrent()
                 LOG.errorf(
@@ -182,6 +202,7 @@ class ModerationNotificationConsumer(
         messageConsumer = null
         runCatching { connection?.close() }
         connection = null
+        state.disconnected()
     }
 
     private class JnatsIncomingMessage(private val message: Message) : ModerationIncomingMessage {
@@ -190,6 +211,9 @@ class ModerationNotificationConsumer(
 
         override val data: ByteArray
             get() = message.data
+
+        override val pendingCount: Long?
+            get() = runCatching { message.metaData().pendingCount() }.getOrNull()
 
         override fun ack() = message.ack()
 

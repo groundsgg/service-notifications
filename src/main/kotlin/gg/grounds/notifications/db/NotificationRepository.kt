@@ -15,6 +15,7 @@ import gg.grounds.notifications.core.NotificationInboxItem
 import gg.grounds.notifications.core.NotificationRecipientRequest
 import gg.grounds.notifications.core.NotificationScope
 import gg.grounds.notifications.core.StoredNotificationAction
+import gg.grounds.notifications.moderation.ModerationNotificationContent
 import gg.grounds.notifications.moderation.ModerationProjectionResult
 import gg.grounds.notifications.moderation.ModerationProjectionStatus
 import gg.grounds.notifications.moderation.ModerationProjectionStore
@@ -512,14 +513,14 @@ class NotificationRepository(
     ): NotificationEventRequest =
         NotificationEventRequest(
             idempotencyKey = "moderation-case-ready:${event.data.caseId}",
-            type = MODERATION_NOTIFICATION_TYPE,
-            category = "MODERATION",
+            type = ModerationNotificationContent.TYPE,
+            category = ModerationNotificationContent.CATEGORY,
             priority = "NORMAL",
             scope = NotificationScope("network"),
             actor = NotificationActor("SYSTEM"),
             entity = NotificationEntity("CASE", event.data.caseId.toString()),
-            title = "Moderation case ready for review",
-            body = "A moderation case is ready for review.",
+            title = ModerationNotificationContent.TITLE,
+            body = ModerationNotificationContent.BODY,
             data = objectMapper.createObjectNode(),
             recipients = users.map(::NotificationRecipientRequest),
             actions =
@@ -1109,6 +1110,6 @@ class NotificationRepository(
     companion object {
         private val LOG: Logger = Logger.getLogger(NotificationRepository::class.java)
         private const val UNIQUE_VIOLATION = "23505"
-        private const val MODERATION_NOTIFICATION_TYPE = "MODERATION_CASE_READY"
+        private const val MODERATION_NOTIFICATION_TYPE = ModerationNotificationContent.TYPE
     }
 }
