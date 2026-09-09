@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import gg.grounds.notifications.core.ActionExecutionResponse
 import gg.grounds.notifications.core.NotificationActionItem
+import gg.grounds.notifications.core.NotificationActionKind
 import gg.grounds.notifications.core.NotificationEventRequest
 import gg.grounds.notifications.core.NotificationEventResponse
 import gg.grounds.notifications.core.NotificationInboxItem
@@ -28,6 +29,7 @@ class NotificationRepository(
 ) {
     fun createEvent(request: NotificationEventRequest): NotificationEventResponse {
         require(request.recipients.isNotEmpty()) { "At least one recipient is required" }
+        request.actions.forEach { it.validated() }
 
         dataSource.connection.use { connection ->
             connection.autoCommit = false
@@ -197,7 +199,8 @@ class NotificationRepository(
             connection
                 .prepareStatement(
                     """
-                    SELECT id, notification_id, action_key, command, payload::text
+                    SELECT id, notification_id, action_key, command, payload::text,
+                           action_kind, entity_type, entity_id
                     FROM notification_actions
                     WHERE notification_id = ? AND action_key = ?
                     """
@@ -218,6 +221,10 @@ class NotificationRepository(
                             actionKey = resultSet.getString("action_key"),
                             command = resultSet.getString("command"),
                             payload = objectMapper.readTree(resultSet.getString("payload")),
+                            kind =
+                                NotificationActionKind.valueOf(resultSet.getString("action_kind")),
+                            entityType = resultSet.getString("entity_type"),
+                            entityId = resultSet.getString("entity_id"),
                         )
                     } finally {
                         resultSet.close()
@@ -447,8 +454,9 @@ class NotificationRepository(
                 .prepareStatement(
                     """
                     INSERT INTO notification_actions
-                      (id, notification_id, action_key, label, style, command, payload, requires_fresh_check)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                      (id, notification_id, action_key, label, style, command, payload,
+                       requires_fresh_check, action_kind, entity_type, entity_id)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """
                         .trimIndent()
                 )
@@ -461,6 +469,9 @@ class NotificationRepository(
                     statement.setString(6, action.command)
                     statement.setJson(7, action.payload ?: objectMapper.createObjectNode())
                     statement.setBoolean(8, action.requiresFreshCheck)
+                    statement.setString(9, action.kind.name)
+                    statement.setString(10, action.entityType)
+                    statement.setString(11, action.entityId)
                     statement.executeUpdate()
                 }
         }
@@ -511,7 +522,7 @@ class NotificationRepository(
         connection
             .prepareStatement(
                 """
-                SELECT a.action_key, a.label, a.style
+                SELECT a.action_key, a.label, a.style, a.action_kind, a.entity_type, a.entity_id
                 FROM notification_actions a
                 WHERE a.notification_id = ?
                   AND NOT EXISTS (
@@ -537,6 +548,12 @@ class NotificationRepository(
                                 actionKey = resultSet.getString("action_key"),
                                 label = resultSet.getString("label"),
                                 style = resultSet.getString("style"),
+                                kind =
+                                    NotificationActionKind.valueOf(
+                                        resultSet.getString("action_kind")
+                                    ),
+                                entityType = resultSet.getString("entity_type"),
+                                entityId = resultSet.getString("entity_id"),
                             )
                     }
                 } finally {
@@ -641,7 +658,8 @@ class NotificationRepository(
         connection
             .prepareStatement(
                 """
-                SELECT id, notification_id, action_key, command, payload::text
+                SELECT id, notification_id, action_key, command, payload::text,
+                       action_kind, entity_type, entity_id
                 FROM notification_actions
                 WHERE notification_id = ? AND action_key = ?
                 FOR UPDATE
@@ -727,6 +745,9 @@ class NotificationRepository(
             actionKey = resultSet.getString("action_key"),
             command = resultSet.getString("command"),
             payload = objectMapper.readTree(resultSet.getString("payload")),
+            kind = NotificationActionKind.valueOf(resultSet.getString("action_kind")),
+            entityType = resultSet.getString("entity_type"),
+            entityId = resultSet.getString("entity_id"),
         )
 
     private fun PreparedStatement.setJson(index: Int, value: JsonNode) {
