@@ -14,10 +14,13 @@ import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.parallel.Execution
+import org.junit.jupiter.api.parallel.ExecutionMode
 import org.junit.jupiter.api.parallel.Isolated
 
 @QuarkusTest
 @Isolated
+@Execution(ExecutionMode.SAME_THREAD)
 class ModerationNotificationProjectorTest {
     @Inject lateinit var repository: NotificationRepository
 
@@ -27,6 +30,7 @@ class ModerationNotificationProjectorTest {
     fun resetDatabase() {
         dataSource.connection.use { connection ->
             connection.createStatement().use { statement ->
+                statement.execute("TRUNCATE notification_outbox")
                 statement.execute("TRUNCATE moderation_notification_projection CASCADE")
                 statement.execute("TRUNCATE notifications CASCADE")
             }
