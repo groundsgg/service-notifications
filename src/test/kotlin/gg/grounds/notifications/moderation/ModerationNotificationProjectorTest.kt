@@ -94,12 +94,15 @@ class ModerationNotificationProjectorTest {
 
     @Test
     fun `deduplicates event and rejects same or stale revisions`() {
-        val first = event(revision = 3)
+        val caseId = UUID.randomUUID()
+        val first = event(caseId = caseId, revision = 3)
         val created = repository.projectModerationCase(first, audience("alpha"))
 
         val duplicate = repository.projectModerationCase(first, audience("beta"))
-        val sameRevision = repository.projectModerationCase(event(revision = 3), audience("beta"))
-        val stale = repository.projectModerationCase(event(revision = 2), audience("beta"))
+        val sameRevision =
+            repository.projectModerationCase(event(caseId = caseId, revision = 3), audience("beta"))
+        val stale =
+            repository.projectModerationCase(event(caseId = caseId, revision = 2), audience("beta"))
 
         assertEquals(ModerationProjectionStatus.DUPLICATE, duplicate.status)
         assertEquals(ModerationProjectionStatus.STALE, sameRevision.status)
