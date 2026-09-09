@@ -1,0 +1,13 @@
+{
+  "eventId": "1d0221ed-e1f9-4d14-8ccd-3309d2759c20",
+  "eventType": "moderation.report.ready-for-review",
+  "schemaVersion": 1,
+  "occurredAt": "2026-07-22T10:15:30Z",
+  "data": {
+    "reportId": "8ca93f15-2e91-43c8-af84-faa9ea9d5669",
+    "caseId": "a1637fc1-30ba-4650-b438-8040fadf92f3",
+    "evidenceCaptureId": "81b1174f-f634-4304-a537-31c6a416af88",
+    "captureStatus": "COMPLETE",
+    "caseRevision": 1
+  }
+}
