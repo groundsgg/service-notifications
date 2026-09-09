@@ -1,5 +1,6 @@
 package gg.grounds.notifications.outbox
 
+import com.fasterxml.jackson.databind.ObjectMapper
 import gg.grounds.notifications.live.NotificationLiveEvent
 import gg.grounds.notifications.live.NotificationLiveEventPublisher
 import io.quarkus.scheduler.Scheduled
@@ -14,6 +15,7 @@ import org.jboss.logging.Logger
 class NotificationOutboxProcessor(
     private val dataSource: DataSource,
     private val liveEventPublisher: NotificationLiveEventPublisher,
+    private val objectMapper: ObjectMapper,
 ) {
     @Scheduled(every = "10s")
     fun processPendingEvents() {
@@ -78,6 +80,7 @@ class NotificationOutboxProcessor(
                                     eventType = resultSet.getString("event_type"),
                                     aggregateId =
                                         resultSet.getObject("aggregate_id", UUID::class.java),
+                                    payload = resultSet.getString("payload"),
                                     attempts = resultSet.getInt("attempts"),
                                 )
                             )
@@ -87,14 +90,16 @@ class NotificationOutboxProcessor(
             }
 
     private fun processNotificationCreated(connection: Connection, event: OutboxEvent) {
+        val payload = parseNotificationPayload(event.payload)
         var failureMessage: String? = null
-        loadRecipients(connection, event.aggregateId).forEach { userId ->
+        val recipients = payload.recipientUserIds ?: loadRecipients(connection, event.aggregateId)
+        recipients.forEach { userId ->
             val liveEvent =
                 NotificationLiveEvent(
                     type = "notifications.changed",
                     userId = userId,
                     notificationId = event.aggregateId.toString(),
-                    reason = "created",
+                    reason = payload.reason,
                     occurredAt = OffsetDateTime.now(),
                 )
             val accepted =
@@ -116,6 +121,45 @@ class NotificationOutboxProcessor(
         } else {
             markRetry(connection, event, finalFailureMessage)
         }
+    }
+
+    private fun parseNotificationPayload(rawPayload: String): NotificationOutboxPayload {
+        val root =
+            runCatching { objectMapper.readTree(rawPayload) }
+                .getOrElse { throw IllegalArgumentException("Invalid notification outbox payload") }
+        if (!root.isObject) throw IllegalArgumentException("Invalid notification outbox payload")
+        val reasonNode = root.path("reason")
+        val reason =
+            if (reasonNode.isMissingNode) {
+                "created"
+            } else {
+                if (!reasonNode.isTextual || reasonNode.asText() !in SAFE_REASONS) {
+                    throw IllegalArgumentException("Invalid notification outbox payload")
+                }
+                reasonNode.asText()
+            }
+        val recipientsNode = root.path("recipientUserIds")
+        val recipients =
+            if (recipientsNode.isMissingNode) {
+                null
+            } else {
+                if (!recipientsNode.isArray) {
+                    throw IllegalArgumentException("Invalid notification outbox payload")
+                }
+                recipientsNode
+                    .map { node ->
+                        if (!node.isTextual || node.asText().isBlank()) {
+                            throw IllegalArgumentException("Invalid notification outbox payload")
+                        }
+                        node.asText()
+                    }
+                    .also { users ->
+                        if (users != users.distinct().sorted()) {
+                            throw IllegalArgumentException("Invalid notification outbox payload")
+                        }
+                    }
+            }
+        return NotificationOutboxPayload(reason, recipients)
     }
 
     private fun loadRecipients(connection: Connection, notificationId: UUID): List<String> =
@@ -185,8 +229,18 @@ class NotificationOutboxProcessor(
         val id: UUID,
         val eventType: String,
         val aggregateId: UUID,
+        val payload: String,
         val attempts: Int,
     )
+
+    private data class NotificationOutboxPayload(
+        val reason: String,
+        val recipientUserIds: List<String>?,
+    )
+
+    private companion object {
+        val SAFE_REASONS = setOf("created", "audience_changed")
+    }
 }
 
 private const val MAX_ATTEMPTS = 5

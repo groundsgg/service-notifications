@@ -17,6 +17,10 @@ data class ForgeAudienceSnapshot(
     val fingerprint: String,
 )
 
+fun interface ForgeAudienceResolver {
+    fun resolveModerationAudience(): ForgeAudienceSnapshot
+}
+
 sealed class ForgeAudienceException(message: String, cause: Throwable? = null) :
     RuntimeException(message, cause)
 
@@ -41,7 +45,7 @@ class ForgeAudienceClient(
     )
     private val projectorEnabled: Boolean,
     private val objectMapper: ObjectMapper,
-) {
+) : ForgeAudienceResolver {
     private val endpoint =
         runCatching {
                 URI.create(baseUrl.trimEnd('/') + "/v1/internal/notification-audiences/resolve")
@@ -61,7 +65,7 @@ class ForgeAudienceClient(
         }
     }
 
-    fun resolveModerationAudience(): ForgeAudienceSnapshot {
+    override fun resolveModerationAudience(): ForgeAudienceSnapshot {
         if (!projectorEnabled) {
             throw TerminalForgeAudienceException("Moderation notification projector is disabled")
         }
