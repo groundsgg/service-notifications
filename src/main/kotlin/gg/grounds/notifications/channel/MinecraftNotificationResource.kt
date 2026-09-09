@@ -69,11 +69,18 @@ class MinecraftNotificationResource(
             )
         val scope = authorizedScope(client, request)
         val playerUuids = request.playerUuids.distinct()
+        val normalizedPlayerUuids =
+            playerUuids.associateWith { playerUuid ->
+                runCatching { UUID.fromString(playerUuid).toString() }
+                    .getOrElse { throw BadRequestException("playerUuid must be a UUID") }
+            }
+        val userIds = playerResolver.resolveUserIds(normalizedPlayerUuids.values.distinct())
         val players =
             playerUuids.mapNotNull { playerUuid ->
-                val userId = playerResolver.resolveUserId(playerUuid) ?: return@mapNotNull null
+                val userId =
+                    userIds[normalizedPlayerUuids.getValue(playerUuid)] ?: return@mapNotNull null
                 val notifications =
-                    notificationRepository.listUnreadForUserInScope(
+                    notificationRepository.listUnreadForUserForMinecraft(
                         userId = userId,
                         scopeType = scope.type,
                         scopeId = scope.id,
@@ -108,8 +115,10 @@ class MinecraftNotificationResource(
             )
         val scope = authorizedScope(client, request)
         val userId =
-            playerResolver.resolveUserId(playerUuid)
-                ?: throw NotFoundException("Minecraft player was not mapped")
+            playerResolver.resolveUserId(
+                runCatching { UUID.fromString(playerUuid).toString() }
+                    .getOrElse { throw BadRequestException("playerUuid must be a UUID") }
+            ) ?: throw NotFoundException("Minecraft player was not mapped")
         if (
             !notificationRepository.recipientExistsInScope(
                 notificationId = notificationId,

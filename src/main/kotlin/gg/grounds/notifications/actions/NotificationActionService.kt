@@ -1,11 +1,13 @@
 package gg.grounds.notifications.actions
 
 import gg.grounds.notifications.core.ActionExecutionResponse
+import gg.grounds.notifications.core.NotificationActionKind
 import gg.grounds.notifications.db.NotificationRepository
 import gg.grounds.notifications.live.NotificationLiveBroadcaster
 import gg.grounds.notifications.live.NotificationLiveEvent
 import gg.grounds.notifications.live.NotificationLiveEventPublisher
 import jakarta.enterprise.context.ApplicationScoped
+import jakarta.ws.rs.ClientErrorException
 import java.time.OffsetDateTime
 import java.util.UUID
 import org.jboss.logging.Logger
@@ -26,6 +28,9 @@ class NotificationActionService(
     ): ActionExecutionResponse {
         val result =
             notificationRepository.executeActionOnce(notificationId, actionKey, userId) { action ->
+                if (action.kind != NotificationActionKind.COMMAND) {
+                    throw ClientErrorException("Navigation actions are not executable", 409)
+                }
                 when (action.command) {
                     "project_invite.accept",
                     "project_invite.decline" ->

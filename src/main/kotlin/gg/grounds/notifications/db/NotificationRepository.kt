@@ -125,7 +125,7 @@ class NotificationRepository(
         }
     }
 
-    fun listUnreadForUserInScope(
+    fun listUnreadForUserForMinecraft(
         userId: String,
         scopeType: String,
         scopeId: String,
@@ -139,7 +139,7 @@ class NotificationRepository(
                     FROM notification_recipients r
                     JOIN notifications n ON n.id = r.notification_id
                     WHERE r.user_id = ? AND r.archived_at IS NULL
-                      AND n.scope_type = ? AND n.scope_id = ?
+                      AND ((n.scope_type = ? AND n.scope_id = ?) OR n.scope_type = 'network')
                       AND r.read_at IS NULL
                       AND (n.expires_at IS NULL OR n.expires_at > now())
                     ORDER BY n.created_at DESC
@@ -237,7 +237,7 @@ class NotificationRepository(
                     JOIN notifications n ON n.id = r.notification_id
                     WHERE r.notification_id = ? AND r.user_id = ?
                       AND r.archived_at IS NULL
-                      AND n.scope_type = ? AND n.scope_id = ?
+                      AND ((n.scope_type = ? AND n.scope_id = ?) OR n.scope_type = 'network')
                       AND (n.expires_at IS NULL OR n.expires_at > now())
                     """
                         .trimIndent()
