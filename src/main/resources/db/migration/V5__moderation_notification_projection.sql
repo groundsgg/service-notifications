@@ -3,7 +3,15 @@ ALTER TABLE notification_actions
     ADD COLUMN action_kind TEXT NOT NULL DEFAULT 'COMMAND'
         CHECK (action_kind IN ('COMMAND', 'OPEN_PORTAL_CASE')),
     ADD COLUMN entity_type TEXT,
-    ADD COLUMN entity_id TEXT,
+    ADD COLUMN entity_id TEXT;
+
+-- Empty commands were accepted by the legacy API. They cannot be executed safely and
+-- would violate the typed action shape, so remove those invalid actions before validating
+-- the new constraint. Referencing action results are removed by their existing cascade.
+DELETE FROM notification_actions
+WHERE length(trim(command)) = 0;
+
+ALTER TABLE notification_actions
     ADD CONSTRAINT notification_action_typed_shape_check CHECK (
         (
             action_kind = 'COMMAND'
