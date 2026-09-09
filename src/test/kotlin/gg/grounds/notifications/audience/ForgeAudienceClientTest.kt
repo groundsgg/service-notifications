@@ -64,7 +64,26 @@ class ForgeAudienceClientTest {
             client().resolveModerationAudience()
         }
         server?.stop(0)
+        serve(401, "{}")
+        assertThrows(RetryableForgeAudienceException::class.java) {
+            client().resolveModerationAudience()
+        }
+        server?.stop(0)
+        serve(403, "{}")
+        assertThrows(RetryableForgeAudienceException::class.java) {
+            client().resolveModerationAudience()
+        }
+        server?.stop(0)
         serve(400, "{}")
+        assertThrows(TerminalForgeAudienceException::class.java) {
+            client().resolveModerationAudience()
+        }
+    }
+
+    @Test
+    fun `rejects oversized response before parsing`() {
+        serve(200, "x".repeat(1_048_577))
+
         assertThrows(TerminalForgeAudienceException::class.java) {
             client().resolveModerationAudience()
         }

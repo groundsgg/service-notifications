@@ -35,7 +35,7 @@ interface ModerationIncomingMessage {
 
     fun ack()
 
-    fun nak()
+    fun nak(delay: Duration)
 
     fun term()
 }
@@ -44,6 +44,7 @@ class ModerationMessageProcessor(
     private val validator: ModerationEventValidator,
     private val metrics: ModerationNotificationMetrics? = null,
     private val state: ModerationConsumerState? = null,
+    private val retryDelay: Duration = Duration.ofSeconds(5),
     private val handler: ModerationReadyEventHandler,
 ) {
     fun process(message: ModerationIncomingMessage) {
@@ -63,10 +64,10 @@ class ModerationMessageProcessor(
             message.term()
         } catch (_: RetryableModerationNotificationException) {
             metrics?.recordRetry(ModerationRetryReason.PROJECTION)
-            message.nak()
+            message.nak(retryDelay)
         } catch (_: Exception) {
             metrics?.recordRetry(ModerationRetryReason.PROJECTION)
-            message.nak()
+            message.nak(retryDelay)
         }
     }
 }
@@ -217,7 +218,7 @@ class ModerationNotificationConsumer(
 
         override fun ack() = message.ack()
 
-        override fun nak() = message.nak()
+        override fun nak(delay: Duration) = message.nakWithDelay(delay)
 
         override fun term() = message.term()
     }

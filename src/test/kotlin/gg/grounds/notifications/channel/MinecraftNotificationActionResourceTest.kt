@@ -223,6 +223,40 @@ class MinecraftNotificationActionResourceTest {
         assertActionResultCount(notificationId, 0)
     }
 
+    @Test
+    fun minecraftChannelActionRejectsNetworkScopedCommand() {
+        val apiToken = seedChannelClient(channel = "api", scopes = listOf("notifications:write"))
+        val minecraftToken =
+            seedChannelClient(
+                channel = "minecraft",
+                scopes = listOf("minecraft.notifications.action"),
+                serverId = "server-1",
+            )
+        val playerUuid = UUID.randomUUID().toString()
+        playerResolver.mapPlayer(playerUuid, "user-alpha")
+        val notificationId =
+            postNotificationEvent(
+                apiToken,
+                "event-network-command-rejected",
+                "user-alpha",
+                inviteId = "invite-network",
+                scopeType = "network",
+                scopeId = null,
+            )
+
+        given()
+            .header("Authorization", "Bearer $minecraftToken")
+            .contentType("application/json")
+            .body("""{"playerUuid":"$playerUuid","serverId":"server-1"}""")
+            .post(
+                "/v1/channel/minecraft/notifications/$notificationId/actions/project_invite.accept"
+            )
+            .then()
+            .statusCode(403)
+
+        assertActionResultCount(notificationId, 0)
+    }
+
     private fun assertMinecraftActionForbidden(token: String, body: String) {
         given()
             .header("Authorization", "Bearer $token")
@@ -241,7 +275,7 @@ class MinecraftNotificationActionResourceTest {
         userId: String,
         inviteId: String,
         scopeType: String,
-        scopeId: String,
+        scopeId: String?,
     ): String =
         given()
             .header("Authorization", "Bearer $token")
@@ -258,7 +292,7 @@ class MinecraftNotificationActionResourceTest {
         userId: String,
         inviteId: String,
         scopeType: String,
-        scopeId: String,
+        scopeId: String?,
     ): String =
         """
         {
@@ -266,7 +300,7 @@ class MinecraftNotificationActionResourceTest {
           "type":"project_invite",
           "category":"project",
           "priority":"normal",
-          "scope":{"type":"$scopeType","id":"$scopeId"},
+          "scope":${if (scopeId == null) "{\"type\":\"$scopeType\"}" else "{\"type\":\"$scopeType\",\"id\":\"$scopeId\"}"},
           "actor":{"type":"user","id":"user-owner"},
           "entity":{"type":"project_invite","id":"$inviteId"},
           "title":"Project invite",

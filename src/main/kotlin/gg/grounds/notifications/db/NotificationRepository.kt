@@ -228,6 +228,7 @@ class NotificationRepository(
         userId: String,
         scopeType: String,
         scopeId: String,
+        allowNetworkScope: Boolean = true,
     ): Boolean =
         dataSource.connection.use { connection ->
             connection
@@ -238,7 +239,8 @@ class NotificationRepository(
                     JOIN notifications n ON n.id = r.notification_id
                     WHERE r.notification_id = ? AND r.user_id = ?
                       AND r.archived_at IS NULL
-                      AND ((n.scope_type = ? AND n.scope_id = ?) OR n.scope_type = 'network')
+                      AND ((n.scope_type = ? AND n.scope_id = ?) OR
+                           (? AND n.scope_type = 'network'))
                       AND (n.expires_at IS NULL OR n.expires_at > now())
                     """
                         .trimIndent()
@@ -248,6 +250,7 @@ class NotificationRepository(
                     statement.setString(2, userId)
                     statement.setString(3, scopeType)
                     statement.setString(4, scopeId)
+                    statement.setBoolean(5, allowNetworkScope)
                     val resultSet = statement.executeQuery()
                     try {
                         resultSet.next()

@@ -7,6 +7,7 @@ import java.net.URI
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
+import java.nio.charset.StandardCharsets
 import java.time.Duration
 import java.time.Instant
 import org.eclipse.microprofile.config.inject.ConfigProperty
@@ -89,7 +90,7 @@ class ForgeAudienceClient(
                 .build()
         val response =
             try {
-                httpClient.send(request, HttpResponse.BodyHandlers.ofString())
+                httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream())
             } catch (exception: InterruptedException) {
                 Thread.currentThread().interrupt()
                 throw RetryableForgeAudienceException(
@@ -99,15 +100,23 @@ class ForgeAudienceClient(
             } catch (exception: Exception) {
                 throw RetryableForgeAudienceException("Forge audience request failed", exception)
             }
-        if (response.statusCode() == 429 || response.statusCode() >= 500) {
+        if (response.statusCode() in setOf(401, 403, 429) || response.statusCode() >= 500) {
+            response.body().close()
             throw RetryableForgeAudienceException(
                 "Forge audience request is temporarily unavailable"
             )
         }
         if (response.statusCode() !in 200..299) {
+            response.body().close()
             throw TerminalForgeAudienceException("Forge audience request was rejected")
         }
-        return parseSnapshot(response.body())
+        val body =
+            response.body().use { stream ->
+                val bytes = stream.readNBytes(MAX_RESPONSE_LENGTH + 1)
+                if (bytes.size > MAX_RESPONSE_LENGTH) invalidContract()
+                String(bytes, StandardCharsets.UTF_8)
+            }
+        return parseSnapshot(body)
     }
 
     private fun parseSnapshot(body: String): ForgeAudienceSnapshot {

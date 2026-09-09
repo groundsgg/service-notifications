@@ -3,6 +3,7 @@ package gg.grounds.notifications.channel
 import gg.grounds.notifications.actions.NotificationActionService
 import gg.grounds.notifications.auth.ChannelClientAuthService
 import gg.grounds.notifications.core.ActionExecutionResponse
+import gg.grounds.notifications.core.NotificationActionKind
 import gg.grounds.notifications.core.NotificationInboxItem
 import gg.grounds.notifications.db.ChannelClient
 import gg.grounds.notifications.db.NotificationRepository
@@ -119,12 +120,16 @@ class MinecraftNotificationResource(
                 runCatching { UUID.fromString(playerUuid).toString() }
                     .getOrElse { throw BadRequestException("playerUuid must be a UUID") }
             ) ?: throw NotFoundException("Minecraft player was not mapped")
+        val action =
+            notificationRepository.findAction(notificationId, actionKey)
+                ?: throw NotFoundException("Notification action was not found")
         if (
             !notificationRepository.recipientExistsInScope(
                 notificationId = notificationId,
                 userId = userId,
                 scopeType = scope.type,
                 scopeId = scope.id,
+                allowNetworkScope = action.kind == NotificationActionKind.OPEN_PORTAL_CASE,
             )
         ) {
             throw ForbiddenException("Channel client is not authorized for notification scope")

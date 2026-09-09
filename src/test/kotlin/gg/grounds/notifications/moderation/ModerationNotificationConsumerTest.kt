@@ -44,7 +44,7 @@ class ModerationNotificationConsumerTest {
 
         processor.process(message)
 
-        assertEquals(listOf("nak"), calls)
+        assertEquals(listOf("nak:5000"), calls)
     }
 
     @Test
@@ -68,8 +68,8 @@ class ModerationNotificationConsumerTest {
             calls += "ack"
         }
 
-        override fun nak() {
-            calls += "nak"
+        override fun nak(delay: java.time.Duration) {
+            calls += "nak:${delay.toMillis()}"
         }
 
         override fun term() {
