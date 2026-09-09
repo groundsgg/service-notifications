@@ -118,7 +118,11 @@ class MinecraftNotificationBatchResourceTest {
                 org.hamcrest.CoreMatchers.nullValue(),
             )
 
-        given().post("/v1/notifications/$notificationId/actions/open_case").then().statusCode(409)
+        given()
+            .contentType("application/json")
+            .post("/v1/notifications/$notificationId/actions/open_case")
+            .then()
+            .statusCode(409)
         assertTypedActionHadNoSideEffects(UUID.fromString(notificationId))
     }
 
