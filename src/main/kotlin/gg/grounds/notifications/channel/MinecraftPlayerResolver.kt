@@ -9,6 +9,7 @@ import java.net.URI
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
+import java.nio.charset.StandardCharsets
 import java.time.Duration
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
@@ -73,7 +74,7 @@ class ForgeMinecraftPlayerResolver(
                 .build()
         val response =
             try {
-                httpClient.send(request, HttpResponse.BodyHandlers.ofString())
+                httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream())
             } catch (exception: InterruptedException) {
                 Thread.currentThread().interrupt()
                 throw ForgeMinecraftIdentityException(
@@ -87,9 +88,16 @@ class ForgeMinecraftPlayerResolver(
                 )
             }
         if (response.statusCode() !in 200..299) {
+            response.body().close()
             throw ForgeMinecraftIdentityException("Forge Minecraft identity request was rejected")
         }
-        return parseMappings(response.body(), requested.toSet())
+        val body =
+            response.body().use { stream ->
+                val bytes = stream.readNBytes(MAX_RESPONSE_LENGTH + 1)
+                if (bytes.size > MAX_RESPONSE_LENGTH) invalidContract()
+                String(bytes, StandardCharsets.UTF_8)
+            }
+        return parseMappings(body, requested.toSet())
     }
 
     private fun parseMappings(body: String, requested: Set<String>): Map<String, String> {

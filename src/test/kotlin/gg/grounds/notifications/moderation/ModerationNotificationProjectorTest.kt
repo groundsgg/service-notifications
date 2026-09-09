@@ -140,6 +140,28 @@ class ModerationNotificationProjectorTest {
     }
 
     @Test
+    fun `newer revisions reuse unchanged moderation audience rows`() {
+        val caseId = UUID.randomUUID()
+        val created =
+            repository.projectModerationCase(
+                event(caseId = caseId, revision = 1),
+                audience("alpha"),
+            )
+
+        repository.projectModerationCase(
+            event(caseId = caseId, revision = 2),
+            audience("alpha", fingerprint = "b".repeat(64)),
+        )
+        repository.projectModerationCase(
+            event(caseId = caseId, revision = 3),
+            audience("alpha", fingerprint = "c".repeat(64)),
+        )
+
+        assertEquals(listOf("alpha"), activeRecipients(created.notificationId))
+        assertEquals(1, count("notification_audiences"))
+    }
+
+    @Test
     fun `concurrent first events converge on one notification`() {
         val caseId = UUID.randomUUID()
         val pool = Executors.newFixedThreadPool(2)

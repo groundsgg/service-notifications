@@ -545,25 +545,27 @@ class NotificationRepository(
         notificationId: UUID,
         users: List<String>,
     ) {
+        val existingAudienceIds = moderationAudienceIds(connection, notificationId)
         val audienceIds =
             users.associateWith { userId ->
-                UUID.randomUUID().also { audienceId ->
-                    connection
-                        .prepareStatement(
-                            """
-                            INSERT INTO notification_audiences
-                              (id, notification_id, audience_type, audience_id)
-                            VALUES (?, ?, 'user', ?)
-                            """
-                                .trimIndent()
-                        )
-                        .use { statement ->
-                            statement.setObject(1, audienceId)
-                            statement.setObject(2, notificationId)
-                            statement.setString(3, userId)
-                            statement.executeUpdate()
-                        }
-                }
+                existingAudienceIds[userId]
+                    ?: UUID.randomUUID().also { audienceId ->
+                        connection
+                            .prepareStatement(
+                                """
+                                INSERT INTO notification_audiences
+                                  (id, notification_id, audience_type, audience_id)
+                                VALUES (?, ?, 'user', ?)
+                                """
+                                    .trimIndent()
+                            )
+                            .use { statement ->
+                                statement.setObject(1, audienceId)
+                                statement.setObject(2, notificationId)
+                                statement.setString(3, userId)
+                                statement.executeUpdate()
+                            }
+                    }
             }
         users.forEach { userId ->
             connection
@@ -607,7 +609,53 @@ class NotificationRepository(
                     statement.executeBatch()
                 }
         }
+        connection
+            .prepareStatement(
+                """
+                DELETE FROM notification_audiences audience
+                WHERE audience.notification_id = ?
+                  AND audience.audience_type = 'user'
+                  AND NOT EXISTS (
+                    SELECT 1 FROM notification_recipients recipient
+                    WHERE recipient.resolved_from_audience_id = audience.id
+                  )
+                """
+                    .trimIndent()
+            )
+            .use { statement ->
+                statement.setObject(1, notificationId)
+                statement.executeUpdate()
+            }
     }
+
+    private fun moderationAudienceIds(
+        connection: Connection,
+        notificationId: UUID,
+    ): Map<String, UUID> =
+        connection
+            .prepareStatement(
+                """
+                SELECT recipient.user_id, recipient.resolved_from_audience_id
+                FROM notification_recipients recipient
+                JOIN notification_audiences audience
+                  ON audience.id = recipient.resolved_from_audience_id
+                WHERE recipient.notification_id = ? AND audience.audience_type = 'user'
+                """
+                    .trimIndent()
+            )
+            .use { statement ->
+                statement.setObject(1, notificationId)
+                statement.executeQuery().use { result ->
+                    buildMap {
+                        while (result.next()) {
+                            put(
+                                result.getString("user_id"),
+                                result.getObject("resolved_from_audience_id", UUID::class.java),
+                            )
+                        }
+                    }
+                }
+            }
 
     private fun activeRecipientUserIds(connection: Connection, notificationId: UUID): List<String> =
         connection

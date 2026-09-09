@@ -79,6 +79,15 @@ class ForgeMinecraftPlayerResolverTest {
         assertEquals(false, timeout.message.orEmpty().contains("503"))
     }
 
+    @Test
+    fun `rejects oversized response bodies`() {
+        serveResponse(200, "x".repeat(1_048_577))
+
+        assertThrows(ForgeMinecraftIdentityException::class.java) {
+            resolver().resolveUserIds(listOf("069a79f4-44e9-4726-a5be-fca90e38aaf5"))
+        }
+    }
+
     private fun serveResponse(status: Int, response: String) {
         serve { exchange ->
             exchange.requestBody.use { it.readAllBytes() }
