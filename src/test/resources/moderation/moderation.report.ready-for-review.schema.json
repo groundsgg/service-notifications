@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://api.grounds.gg/schemas/moderation/events/v1/moderation.report.ready-for-review.schema.json",
+  "title": "Moderation report ready for review event v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["eventId", "eventType", "schemaVersion", "occurredAt", "data"],
+  "properties": {
+    "eventId": { "type": "string", "format": "uuid" },
+    "eventType": { "const": "moderation.report.ready-for-review" },
+    "schemaVersion": { "const": 1 },
+    "occurredAt": { "type": "string", "format": "date-time" },
+    "data": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reportId", "caseId", "evidenceCaptureId", "captureStatus", "caseRevision"],
+      "properties": {
+        "reportId": { "type": "string", "format": "uuid" },
+        "caseId": { "type": "string", "format": "uuid" },
+        "evidenceCaptureId": { "type": "string", "format": "uuid" },
+        "captureStatus": { "enum": ["COMPLETE", "INCOMPLETE"] },
+        "caseRevision": { "type": "integer", "minimum": 1 }
+      }
+    }
+  }
+}

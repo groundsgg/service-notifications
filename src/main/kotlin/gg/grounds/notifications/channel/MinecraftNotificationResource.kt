@@ -3,6 +3,7 @@ package gg.grounds.notifications.channel
 import gg.grounds.notifications.actions.NotificationActionService
 import gg.grounds.notifications.auth.ChannelClientAuthService
 import gg.grounds.notifications.core.ActionExecutionResponse
+import gg.grounds.notifications.core.NotificationActionKind
 import gg.grounds.notifications.core.NotificationInboxItem
 import gg.grounds.notifications.db.ChannelClient
 import gg.grounds.notifications.db.NotificationRepository
@@ -69,11 +70,18 @@ class MinecraftNotificationResource(
             )
         val scope = authorizedScope(client, request)
         val playerUuids = request.playerUuids.distinct()
+        val normalizedPlayerUuids =
+            playerUuids.associateWith { playerUuid ->
+                runCatching { UUID.fromString(playerUuid).toString() }
+                    .getOrElse { throw BadRequestException("playerUuid must be a UUID") }
+            }
+        val userIds = playerResolver.resolveUserIds(normalizedPlayerUuids.values.distinct())
         val players =
             playerUuids.mapNotNull { playerUuid ->
-                val userId = playerResolver.resolveUserId(playerUuid) ?: return@mapNotNull null
+                val userId =
+                    userIds[normalizedPlayerUuids.getValue(playerUuid)] ?: return@mapNotNull null
                 val notifications =
-                    notificationRepository.listUnreadForUserInScope(
+                    notificationRepository.listUnreadForUserForMinecraft(
                         userId = userId,
                         scopeType = scope.type,
                         scopeId = scope.id,
@@ -108,14 +116,20 @@ class MinecraftNotificationResource(
             )
         val scope = authorizedScope(client, request)
         val userId =
-            playerResolver.resolveUserId(playerUuid)
-                ?: throw NotFoundException("Minecraft player was not mapped")
+            playerResolver.resolveUserId(
+                runCatching { UUID.fromString(playerUuid).toString() }
+                    .getOrElse { throw BadRequestException("playerUuid must be a UUID") }
+            ) ?: throw NotFoundException("Minecraft player was not mapped")
+        val action =
+            notificationRepository.findAction(notificationId, actionKey)
+                ?: throw NotFoundException("Notification action was not found")
         if (
             !notificationRepository.recipientExistsInScope(
                 notificationId = notificationId,
                 userId = userId,
                 scopeType = scope.type,
                 scopeId = scope.id,
+                allowNetworkScope = action.kind == NotificationActionKind.OPEN_PORTAL_CASE,
             )
         ) {
             throw ForbiddenException("Channel client is not authorized for notification scope")

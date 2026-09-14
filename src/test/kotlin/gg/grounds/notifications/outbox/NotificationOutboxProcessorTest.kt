@@ -107,6 +107,39 @@ class NotificationOutboxProcessorTest {
     }
 
     @Test
+    fun targetedAudienceChangePublishesOnlyPayloadRecipientsIncludingRemovedUsers() {
+        val notificationId = UUID.randomUUID()
+        val outboxId = UUID.randomUUID()
+        dataSource.connection.use { connection ->
+            seedNotification(connection, notificationId, "outbox-audience-change-1")
+            insertRecipient(connection, notificationId, "unchanged-user")
+            connection
+                .prepareStatement(
+                    """
+                    INSERT INTO notification_outbox (id, event_type, aggregate_id, payload)
+                    VALUES (?, 'notification.created', ?,
+                            '{"reason":"audience_changed","recipientUserIds":["added-user","removed-user"]}'::jsonb)
+                    """
+                        .trimIndent()
+                )
+                .use { statement ->
+                    statement.setObject(1, outboxId)
+                    statement.setObject(2, notificationId)
+                    statement.executeUpdate()
+                }
+        }
+
+        outboxProcessor.processPendingEvents()
+
+        assertEquals(
+            listOf("added-user", "removed-user"),
+            liveEventPublisher.events.map { it.userId },
+        )
+        assertTrue(liveEventPublisher.events.all { it.reason == "audience_changed" })
+        assertOutboxStatus(outboxId, "processed", attempts = 0)
+    }
+
+    @Test
     fun failedPublishIncrementsAttemptsAndSchedulesRetry() {
         val notificationId = UUID.randomUUID()
         val outboxId = UUID.randomUUID()

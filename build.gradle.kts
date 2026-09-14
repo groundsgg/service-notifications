@@ -29,9 +29,10 @@ dependencies {
     implementation("io.quarkus:quarkus-smallrye-jwt")
     implementation("io.quarkus:quarkus-scheduler")
     implementation("io.quarkus:quarkus-smallrye-health")
+    implementation("io.quarkus:quarkus-micrometer-registry-prometheus")
     implementation("io.quarkus:quarkus-smallrye-openapi")
     implementation("com.fasterxml.jackson.module:jackson-module-kotlin")
-    implementation("io.nats:jnats:2.25.3")
+    implementation("io.nats:jnats:2.26.0")
 
     testImplementation("io.quarkus:quarkus-junit5")
     testImplementation("io.quarkus:quarkus-test-security")
