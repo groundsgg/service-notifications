@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.0](https://github.com/groundsgg/service-notifications/compare/service-notifications-v0.6.2...service-notifications-v0.7.0) (2026-09-14)
+
+
+### Features
+
+* project moderation cases into shared notifications ([#23](https://github.com/groundsgg/service-notifications/issues/23)) ([8524dea](https://github.com/groundsgg/service-notifications/commit/8524dea8a5666484e0e079e1f70eaffd9c397e3d))
+
 ## [0.6.2](https://github.com/groundsgg/service-notifications/compare/service-notifications-v0.6.1...service-notifications-v0.6.2) (2026-07-28)
 
 
