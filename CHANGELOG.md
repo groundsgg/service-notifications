@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.1](https://github.com/groundsgg/service-notifications/compare/service-notifications-v0.7.0...service-notifications-v0.7.1) (2026-09-15)
+
+
+### Bug Fixes
+
+* **observability:** expose moderation audience resolution failures ([#25](https://github.com/groundsgg/service-notifications/issues/25)) ([78bca22](https://github.com/groundsgg/service-notifications/commit/78bca2275052abbc279df7427a4402937c6caa59))
+
 ## [0.7.0](https://github.com/groundsgg/service-notifications/compare/service-notifications-v0.6.2...service-notifications-v0.7.0) (2026-09-14)
 
 
