@@ -55,11 +55,13 @@ class ModerationNotificationProjector(
             try {
                 audienceResolver.resolveModerationAudience()
             } catch (exception: RetryableForgeAudienceException) {
+                metrics?.recordAudienceFailure(ModerationAudienceFailureResult.RETRYABLE)
                 throw RetryableModerationNotificationException(
                     "Moderation audience resolution is temporarily unavailable",
                     exception,
                 )
             } catch (exception: TerminalForgeAudienceException) {
+                metrics?.recordAudienceFailure(ModerationAudienceFailureResult.TERMINAL)
                 throw TerminalModerationNotificationException(
                     "Moderation audience resolution failed terminally",
                     exception,
