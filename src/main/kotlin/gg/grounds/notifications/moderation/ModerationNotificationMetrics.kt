@@ -17,9 +17,21 @@ enum class ModerationFailureReason(val tag: String) {
     TERMINAL_PROJECTION("terminal_projection"),
 }
 
+enum class ModerationAudienceFailureResult(val tag: String) {
+    RETRYABLE("retryable"),
+    TERMINAL("terminal"),
+}
+
 @ApplicationScoped
 class ModerationNotificationMetrics(private val registry: MeterRegistry) {
     private val consumerLag = AtomicLong()
+    private val audienceFailures =
+        ModerationAudienceFailureResult.entries.associateWith { result ->
+            Counter.builder("notifications.moderation.audience.resolution.failures")
+                .description("Forge audience resolution failures by bounded retry classification")
+                .tag("result", result.tag)
+                .register(registry)
+        }
     private val deduplicated =
         Counter.builder("notifications.moderation.deduplicated")
             .description("Moderation events deduplicated by the canonical projection")
@@ -37,6 +49,10 @@ class ModerationNotificationMetrics(private val registry: MeterRegistry) {
 
     fun updateConsumerLag(value: Long) {
         consumerLag.set(value.coerceAtLeast(0))
+    }
+
+    fun recordAudienceFailure(result: ModerationAudienceFailureResult) {
+        audienceFailures.getValue(result).increment()
     }
 
     fun recordProjection(status: ModerationProjectionStatus, latency: Duration) {
