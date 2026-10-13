@@ -1,5 +1,6 @@
 package gg.grounds.notifications.db
 
+import gg.grounds.notifications.moderation.ModerationEnvironment
 import jakarta.enterprise.context.ApplicationScoped
 import java.util.UUID
 import javax.sql.DataSource
@@ -11,6 +12,7 @@ data class ChannelClient(
     val projectId: String?,
     val serverId: String?,
     val deploymentId: String?,
+    val moderationEnvironment: ModerationEnvironment? = null,
 )
 
 @ApplicationScoped
@@ -20,7 +22,7 @@ class ChannelClientRepository(private val dataSource: DataSource) {
             connection
                 .prepareStatement(
                     """
-                    SELECT id, channel, project_id, server_id, deployment_id, scopes
+                    SELECT id, channel, project_id, server_id, deployment_id, scopes, moderation_environment
                     FROM notification_channel_clients
                     WHERE token_hash = ? AND revoked_at IS NULL
                     """
@@ -41,6 +43,10 @@ class ChannelClientRepository(private val dataSource: DataSource) {
                             projectId = resultSet.getString("project_id"),
                             serverId = resultSet.getString("server_id"),
                             deploymentId = resultSet.getString("deployment_id"),
+                            moderationEnvironment =
+                                ModerationEnvironment.parse(
+                                    resultSet.getString("moderation_environment")
+                                ),
                         )
                     } finally {
                         resultSet.close()

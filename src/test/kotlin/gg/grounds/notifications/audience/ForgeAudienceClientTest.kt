@@ -2,6 +2,8 @@ package gg.grounds.notifications.audience
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.sun.net.httpserver.HttpServer
+import gg.grounds.notifications.moderation.EnvironmentModerationNotificationRuntime
+import gg.grounds.notifications.moderation.ModerationEnvironment
 import java.net.InetSocketAddress
 import java.time.Duration
 import java.time.Instant
@@ -50,6 +52,42 @@ class ForgeAudienceClientTest {
             "308360c38170195c9edcf99e6448eea5f85ff3d00881ce3f2688c4db309807c1",
             snapshot.fingerprint,
         )
+    }
+
+    @Test
+    fun `environment audience requires support area report notification and matching environment rights`() {
+        val requestBody = AtomicReference<String>()
+        server =
+            HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0).apply {
+                createContext("/v1/internal/notification-audiences/resolve") { exchange ->
+                    requestBody.set(exchange.requestBody.bufferedReader().readText())
+                    val body =
+                        """{"recipients":[{"userId":"a-user"},{"userId":"b-user"}],"resolvedAt":"2026-09-08T18:00:00Z","resolutionFingerprint":"308360c38170195c9edcf99e6448eea5f85ff3d00881ce3f2688c4db309807c1"}"""
+                    exchange.sendResponseHeaders(200, body.toByteArray().size.toLong())
+                    exchange.responseBody.use { it.write(body.toByteArray()) }
+                }
+                start()
+            }
+        for ((environment, permission) in
+            listOf(
+                ModerationEnvironment.STAGE to "MODERATION_STAGE_ACCESS",
+                ModerationEnvironment.PROD to "MODERATION_PROD_ACCESS",
+            )) {
+            client(readyRuntime = EnvironmentModerationNotificationRuntime(true, true))
+                .resolveModerationAudience(environment)
+            val json = ObjectMapper().readTree(requestBody.get())
+            assertEquals(
+                setOf(
+                    "SUPPORT_AREA_ACCESS",
+                    "MODERATION_REPORTS_VIEW",
+                    "MODERATION_NOTIFICATIONS_VIEW",
+                    permission,
+                ),
+                json.path("permissionKeys").map { it.asText() }.toSet(),
+            )
+            assertEquals(4, json.path("permissionKeys").size())
+            assertEquals("ALL", json.path("match").asText())
+        }
     }
 
     @Test
@@ -134,6 +172,36 @@ class ForgeAudienceClientTest {
         }
     }
 
+    @Test
+    fun `stage projector can resolve its audience while legacy and prod remain disabled`() {
+        serve(
+            200,
+            """{"recipients":[{"userId":"a-user"},{"userId":"b-user"}],"resolvedAt":"2026-09-08T18:00:00Z","resolutionFingerprint":"308360c38170195c9edcf99e6448eea5f85ff3d00881ce3f2688c4db309807c1"}""",
+        )
+        val stageOnly =
+            client(
+                projectorEnabled = false,
+                readyRuntime = EnvironmentModerationNotificationRuntime(true, false),
+            )
+        assertEquals(
+            listOf("a-user", "b-user"),
+            stageOnly.resolveModerationAudience(ModerationEnvironment.STAGE).userIds,
+        )
+        assertThrows(TerminalForgeAudienceException::class.java) {
+            stageOnly.resolveModerationAudience(ModerationEnvironment.PROD)
+        }
+        assertThrows(TerminalForgeAudienceException::class.java) {
+            stageOnly.resolveModerationAudience()
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            client(
+                internalToken = "",
+                projectorEnabled = false,
+                readyRuntime = EnvironmentModerationNotificationRuntime(true, false),
+            )
+        }
+    }
+
     private fun serve(status: Int, body: String) {
         server =
             HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0).apply {
@@ -151,6 +219,8 @@ class ForgeAudienceClientTest {
         internalToken: String = "internal-token",
         readTimeout: Duration = Duration.ofSeconds(1),
         projectorEnabled: Boolean = true,
+        readyRuntime: EnvironmentModerationNotificationRuntime =
+            EnvironmentModerationNotificationRuntime(false, false),
     ) =
         ForgeAudienceClient(
             baseUrl = baseUrl,
@@ -159,5 +229,6 @@ class ForgeAudienceClientTest {
             readTimeout = readTimeout,
             projectorEnabled = projectorEnabled,
             objectMapper = ObjectMapper(),
+            environmentRuntime = readyRuntime,
         )
 }

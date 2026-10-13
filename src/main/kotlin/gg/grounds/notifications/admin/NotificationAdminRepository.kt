@@ -1,5 +1,6 @@
 package gg.grounds.notifications.admin
 
+import gg.grounds.notifications.moderation.ModerationEnvironment
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.ws.rs.NotFoundException
 import java.security.MessageDigest
@@ -104,7 +105,7 @@ class NotificationAdminRepository(private val dataSource: DataSource) {
             connection
                 .prepareStatement(
                     """
-                    SELECT id, channel, project_id, server_id, deployment_id, scopes, created_at, revoked_at
+                    SELECT id, channel, project_id, server_id, deployment_id, scopes, created_at, revoked_at, moderation_environment
                     FROM notification_channel_clients
                     ORDER BY created_at DESC
                     """
@@ -132,8 +133,8 @@ class NotificationAdminRepository(private val dataSource: DataSource) {
                 .prepareStatement(
                     """
                     INSERT INTO notification_channel_clients
-                      (id, channel, token_hash, project_id, server_id, deployment_id, scopes)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                      (id, channel, token_hash, project_id, server_id, deployment_id, scopes, moderation_environment)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     """
                         .trimIndent()
                 )
@@ -148,6 +149,7 @@ class NotificationAdminRepository(private val dataSource: DataSource) {
                         7,
                         connection.createArrayOf("text", request.scopes.toTypedArray()),
                     )
+                    statement.setString(8, request.moderationEnvironment?.wireValue)
                     statement.executeUpdate()
                 }
             insertAuditEvent(
@@ -159,6 +161,7 @@ class NotificationAdminRepository(private val dataSource: DataSource) {
                 metadata =
                     mapOf(
                         "channel" to request.channel.trim(),
+                        "moderationEnvironment" to request.moderationEnvironment?.wireValue,
                         "projectId" to request.projectId,
                         "serverId" to request.serverId,
                         "deploymentId" to request.deploymentId,
@@ -496,7 +499,7 @@ class NotificationAdminRepository(private val dataSource: DataSource) {
         connection
             .prepareStatement(
                 """
-                SELECT id, channel, project_id, server_id, deployment_id, scopes, created_at, revoked_at
+                SELECT id, channel, project_id, server_id, deployment_id, scopes, created_at, revoked_at, moderation_environment
                 FROM notification_channel_clients
                 WHERE id = ?
                 """
@@ -566,6 +569,7 @@ class NotificationAdminRepository(private val dataSource: DataSource) {
             scopes = getTextArray("scopes"),
             createdAt = instantString("created_at")!!,
             revokedAt = instantString("revoked_at"),
+            moderationEnvironment = ModerationEnvironment.parse(getString("moderation_environment")),
         )
 
     private fun ResultSet.teamNotificationDefaultAdminItem(): TeamNotificationDefaultAdminItem =
