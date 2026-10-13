@@ -85,6 +85,7 @@ class MinecraftNotificationResource(
                         userId = userId,
                         scopeType = scope.type,
                         scopeId = scope.id,
+                        moderationEnvironment = client.moderationEnvironment,
                     )
                 if (notifications.isEmpty()) {
                     return@mapNotNull null
@@ -130,6 +131,7 @@ class MinecraftNotificationResource(
                 scopeType = scope.type,
                 scopeId = scope.id,
                 allowNetworkScope = action.kind == NotificationActionKind.OPEN_PORTAL_CASE,
+                moderationEnvironment = client.moderationEnvironment,
             )
         ) {
             throw ForbiddenException("Channel client is not authorized for notification scope")

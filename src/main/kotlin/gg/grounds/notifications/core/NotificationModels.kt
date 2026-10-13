@@ -1,6 +1,8 @@
 package gg.grounds.notifications.core
 
+import com.fasterxml.jackson.annotation.JsonInclude
 import com.fasterxml.jackson.databind.JsonNode
+import gg.grounds.notifications.moderation.ModerationEnvironment
 import java.time.OffsetDateTime
 import java.util.UUID
 
@@ -42,10 +44,14 @@ data class NotificationActionRequest(
     val kind: NotificationActionKind = NotificationActionKind.COMMAND,
     val entityType: String? = null,
     val entityId: String? = null,
+    @get:JsonInclude(JsonInclude.Include.NON_NULL) val environment: ModerationEnvironment? = null,
 ) {
     fun validated(): NotificationActionRequest {
         when (kind) {
             NotificationActionKind.COMMAND -> {
+                require(environment == null) {
+                    "Command action cannot carry a moderation environment"
+                }
                 require(!command.isNullOrBlank()) { "Command action requires a command" }
                 require(entityType == null && entityId == null) {
                     "Command action cannot carry a navigation entity"
@@ -92,6 +98,7 @@ data class NotificationActionItem(
     val kind: NotificationActionKind,
     val entityType: String?,
     val entityId: String?,
+    @get:JsonInclude(JsonInclude.Include.NON_NULL) val environment: ModerationEnvironment? = null,
 )
 
 data class StoredNotificationAction(
@@ -103,6 +110,7 @@ data class StoredNotificationAction(
     val kind: NotificationActionKind,
     val entityType: String?,
     val entityId: String?,
+    @get:JsonInclude(JsonInclude.Include.NON_NULL) val environment: ModerationEnvironment? = null,
 )
 
 data class ActionExecutionResponse(val status: String, val reason: String? = null)

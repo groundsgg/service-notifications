@@ -2,7 +2,10 @@ package gg.grounds.notifications.audience
 
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
+import gg.grounds.notifications.moderation.EnvironmentModerationNotificationRuntime
+import gg.grounds.notifications.moderation.ModerationEnvironment
 import jakarta.enterprise.context.ApplicationScoped
+import jakarta.inject.Inject
 import java.net.URI
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
@@ -20,6 +23,13 @@ data class ForgeAudienceSnapshot(
 
 fun interface ForgeAudienceResolver {
     fun resolveModerationAudience(): ForgeAudienceSnapshot
+
+    fun resolveModerationAudience(environment: ModerationEnvironment?): ForgeAudienceSnapshot =
+        if (environment == null) resolveModerationAudience()
+        else
+            throw TerminalForgeAudienceException(
+                "Environment-bound audience resolution is unavailable"
+            )
 }
 
 sealed class ForgeAudienceException(message: String, cause: Throwable? = null) :
@@ -32,7 +42,9 @@ class TerminalForgeAudienceException(message: String, cause: Throwable? = null) 
     ForgeAudienceException(message, cause)
 
 @ApplicationScoped
-class ForgeAudienceClient(
+class ForgeAudienceClient
+@Inject
+constructor(
     @ConfigProperty(name = "notifications.forge.base-url") baseUrl: String,
     @param:ConfigProperty(name = "notifications.forge.internal-token")
     private val internalToken: String,
@@ -46,6 +58,8 @@ class ForgeAudienceClient(
     )
     private val projectorEnabled: Boolean,
     private val objectMapper: ObjectMapper,
+    private val environmentRuntime: EnvironmentModerationNotificationRuntime =
+        EnvironmentModerationNotificationRuntime(false, false),
 ) : ForgeAudienceResolver {
     private val endpoint =
         runCatching {
@@ -55,10 +69,11 @@ class ForgeAudienceClient(
     private val httpClient = HttpClient.newBuilder().connectTimeout(connectTimeout).build()
 
     init {
-        require(!projectorEnabled || endpoint.scheme in setOf("http", "https")) {
+        val anyProjectorEnabled = projectorEnabled || environmentRuntime.bindings.isNotEmpty()
+        require(!anyProjectorEnabled || endpoint.scheme in setOf("http", "https")) {
             "Forge audience base URL must use HTTP when moderation projector is enabled"
         }
-        require(!projectorEnabled || internalToken.isNotBlank()) {
+        require(!anyProjectorEnabled || internalToken.isNotBlank()) {
             "Forge internal token is required when moderation projector is enabled"
         }
         require(connectTimeout > Duration.ZERO && readTimeout > Duration.ZERO) {
@@ -66,8 +81,15 @@ class ForgeAudienceClient(
         }
     }
 
-    override fun resolveModerationAudience(): ForgeAudienceSnapshot {
-        if (!projectorEnabled) {
+    override fun resolveModerationAudience(): ForgeAudienceSnapshot =
+        resolveModerationAudience(null)
+
+    override fun resolveModerationAudience(
+        environment: ModerationEnvironment?
+    ): ForgeAudienceSnapshot {
+        val enabled =
+            if (environment == null) projectorEnabled else environmentRuntime.enabled(environment)
+        if (!enabled) {
             throw TerminalForgeAudienceException("Moderation notification projector is disabled")
         }
         val payload =
@@ -77,7 +99,17 @@ class ForgeAudienceClient(
                     objectMapper
                         .createArrayNode()
                         .add("MODERATION_NOTIFICATIONS_VIEW")
-                        .add("MODERATION_REPORTS_VIEW"),
+                        .add("MODERATION_REPORTS_VIEW")
+                        .apply {
+                            if (environment != null) {
+                                add("SUPPORT_AREA_ACCESS")
+                                add(
+                                    if (environment == ModerationEnvironment.STAGE)
+                                        "MODERATION_STAGE_ACCESS"
+                                    else "MODERATION_PROD_ACCESS"
+                                )
+                            }
+                        },
                 )
                 put("match", "ALL")
             }

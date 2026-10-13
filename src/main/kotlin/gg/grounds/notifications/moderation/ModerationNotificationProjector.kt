@@ -5,6 +5,7 @@ import gg.grounds.notifications.audience.ForgeAudienceSnapshot
 import gg.grounds.notifications.audience.RetryableForgeAudienceException
 import gg.grounds.notifications.audience.TerminalForgeAudienceException
 import jakarta.enterprise.context.ApplicationScoped
+import jakarta.inject.Inject
 import java.time.Duration
 import java.time.Instant
 import java.util.UUID
@@ -41,7 +42,9 @@ fun interface ModerationProjectionStore {
 }
 
 @ApplicationScoped
-class ModerationNotificationProjector(
+class ModerationNotificationProjector
+@Inject
+constructor(
     private val audienceResolver: ForgeAudienceResolver,
     private val projectionStore: ModerationProjectionStore,
     private val metrics: ModerationNotificationMetrics? = null,
@@ -53,7 +56,7 @@ class ModerationNotificationProjector(
         }
         val audience =
             try {
-                audienceResolver.resolveModerationAudience()
+                audienceResolver.resolveModerationAudience(event.data.environment)
             } catch (exception: RetryableForgeAudienceException) {
                 metrics?.recordAudienceFailure(ModerationAudienceFailureResult.RETRYABLE)
                 throw RetryableModerationNotificationException(

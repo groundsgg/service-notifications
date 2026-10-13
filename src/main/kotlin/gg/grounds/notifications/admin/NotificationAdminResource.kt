@@ -194,6 +194,9 @@ class NotificationAdminResource(
         if (sanitizedChannel.isBlank()) {
             throw BadRequestException("channel_required")
         }
+        if (moderationEnvironment != null && sanitizedChannel != "minecraft") {
+            throw BadRequestException("moderation_environment_requires_minecraft")
+        }
         val sanitizedScopes = scopes.map { it.trim() }
         if (sanitizedScopes.isEmpty() || sanitizedScopes.any { it.isBlank() }) {
             throw BadRequestException("scopes_required")

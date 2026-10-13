@@ -15,6 +15,8 @@ import gg.grounds.notifications.core.NotificationInboxItem
 import gg.grounds.notifications.core.NotificationRecipientRequest
 import gg.grounds.notifications.core.NotificationScope
 import gg.grounds.notifications.core.StoredNotificationAction
+import gg.grounds.notifications.moderation.EnvironmentModerationEventLedger
+import gg.grounds.notifications.moderation.ModerationEnvironment
 import gg.grounds.notifications.moderation.ModerationNotificationContent
 import gg.grounds.notifications.moderation.ModerationProjectionResult
 import gg.grounds.notifications.moderation.ModerationProjectionStatus
@@ -39,18 +41,24 @@ import org.jboss.logging.Logger
 class NotificationRepository(
     private val dataSource: DataSource,
     private val objectMapper: ObjectMapper,
+    private val eventLedger: EnvironmentModerationEventLedger,
 ) : ModerationProjectionStore {
     override fun findProcessedModerationEvent(
         event: ReportReadyForReviewEvent
     ): ModerationProjectionResult? =
         dataSource.connection.use { connection ->
-            findModerationProjection(connection, event.data.caseId)?.terminalResultFor(event)
+            eventLedger.findProcessed(connection, event)
+                ?: if (event.data.environment == null)
+                    findModerationProjection(connection, event.data.caseId, null)
+                        ?.terminalResultFor(event)
+                else null
         }
 
     override fun projectModerationCase(
         event: ReportReadyForReviewEvent,
         audience: ForgeAudienceSnapshot,
     ): ModerationProjectionResult {
+        eventLedger.verifyVersion(event)
         val fingerprint =
             runCatching { HexFormat.of().parseHex(audience.fingerprint) }
                 .getOrElse { throw IllegalArgumentException("Audience fingerprint is invalid", it) }
@@ -62,9 +70,16 @@ class NotificationRepository(
         return dataSource.connection.use { connection ->
             connection.autoCommit = false
             try {
-                lockModerationCase(connection, event.data.caseId)
-                val existing = findModerationProjection(connection, event.data.caseId)
+                eventLedger.lock(connection, event)
+                eventLedger.findProcessed(connection, event)?.let { result ->
+                    connection.commit()
+                    return@use result
+                }
+                lockModerationCase(connection, event.data.caseId, event.data.environment)
+                val existing =
+                    findModerationProjection(connection, event.data.caseId, event.data.environment)
                 existing?.terminalResultFor(event)?.let { result ->
+                    eventLedger.record(connection, event, result)
                     connection.commit()
                     return@use result
                 }
@@ -81,6 +96,7 @@ class NotificationRepository(
                             users,
                         )
                     }
+                eventLedger.record(connection, event, result)
                 connection.commit()
                 result
             } catch (exception: Exception) {
@@ -130,6 +146,7 @@ class NotificationRepository(
         userId: String,
         scopeType: String,
         scopeId: String,
+        moderationEnvironment: ModerationEnvironment? = null,
     ): List<NotificationInboxItem> =
         dataSource.connection.use { connection ->
             connection
@@ -141,6 +158,7 @@ class NotificationRepository(
                     JOIN notifications n ON n.id = r.notification_id
                     WHERE r.user_id = ? AND r.archived_at IS NULL
                       AND ((n.scope_type = ? AND n.scope_id = ?) OR n.scope_type = 'network')
+                      $MINECRAFT_MODERATION_ENVIRONMENT_FILTER
                       AND r.read_at IS NULL
                       AND (n.expires_at IS NULL OR n.expires_at > now())
                     ORDER BY n.created_at DESC
@@ -152,6 +170,8 @@ class NotificationRepository(
                     statement.setString(1, userId)
                     statement.setString(2, scopeType)
                     statement.setString(3, scopeId)
+                    statement.setString(4, moderationEnvironment?.wireValue)
+                    statement.setString(5, moderationEnvironment?.wireValue)
                     readInboxItems(connection, statement)
                 }
         }
@@ -229,6 +249,7 @@ class NotificationRepository(
         scopeType: String,
         scopeId: String,
         allowNetworkScope: Boolean = true,
+        moderationEnvironment: ModerationEnvironment? = null,
     ): Boolean =
         dataSource.connection.use { connection ->
             connection
@@ -241,6 +262,7 @@ class NotificationRepository(
                       AND r.archived_at IS NULL
                       AND ((n.scope_type = ? AND n.scope_id = ?) OR
                            (? AND n.scope_type = 'network'))
+                      $MINECRAFT_MODERATION_ENVIRONMENT_FILTER
                       AND (n.expires_at IS NULL OR n.expires_at > now())
                     """
                         .trimIndent()
@@ -251,6 +273,8 @@ class NotificationRepository(
                     statement.setString(3, scopeType)
                     statement.setString(4, scopeId)
                     statement.setBoolean(5, allowNetworkScope)
+                    statement.setString(6, moderationEnvironment?.wireValue)
+                    statement.setString(7, moderationEnvironment?.wireValue)
                     val resultSet = statement.executeQuery()
                     try {
                         resultSet.next()
@@ -266,7 +290,7 @@ class NotificationRepository(
                 .prepareStatement(
                     """
                     SELECT id, notification_id, action_key, command, payload::text,
-                           action_kind, entity_type, entity_id
+                           action_kind, entity_type, entity_id, environment
                     FROM notification_actions
                     WHERE notification_id = ? AND action_key = ?
                     """
@@ -291,6 +315,8 @@ class NotificationRepository(
                                 NotificationActionKind.valueOf(resultSet.getString("action_kind")),
                             entityType = resultSet.getString("entity_type"),
                             entityId = resultSet.getString("entity_id"),
+                            environment =
+                                ModerationEnvironment.parse(resultSet.getString("environment")),
                         )
                     } finally {
                         resultSet.close()
@@ -446,8 +472,8 @@ class NotificationRepository(
                 """
                 INSERT INTO moderation_notification_projection (
                     case_id, notification_type, notification_id, source_event_id,
-                    last_case_revision, audience_fingerprint, audience_resolved_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    last_case_revision, audience_fingerprint, audience_resolved_at, environment
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """
                     .trimIndent()
             )
@@ -459,6 +485,7 @@ class NotificationRepository(
                 statement.setLong(5, event.data.caseRevision)
                 statement.setBytes(6, fingerprint)
                 statement.setObject(7, audience.resolvedAt.atOffset(ZoneOffset.UTC))
+                statement.setString(8, event.data.environment?.wireValue)
                 statement.executeUpdate()
             }
         insertModerationOutboxEvent(connection, notificationId, users, "created")
@@ -484,7 +511,7 @@ class NotificationRepository(
                 UPDATE moderation_notification_projection
                 SET source_event_id = ?, last_case_revision = ?, audience_fingerprint = ?,
                     audience_resolved_at = ?, updated_at = transaction_timestamp()
-                WHERE case_id = ? AND notification_type = ?
+                WHERE case_id = ? AND notification_type = ? AND environment IS NOT DISTINCT FROM ?
                 """
                     .trimIndent()
             )
@@ -495,6 +522,7 @@ class NotificationRepository(
                 statement.setObject(4, audience.resolvedAt.atOffset(ZoneOffset.UTC))
                 statement.setObject(5, event.data.caseId)
                 statement.setString(6, MODERATION_NOTIFICATION_TYPE)
+                statement.setString(7, event.data.environment?.wireValue)
                 check(statement.executeUpdate() == 1) { "Moderation projection disappeared" }
             }
         insertModerationOutboxEvent(
@@ -515,7 +543,10 @@ class NotificationRepository(
         users: List<String>,
     ): NotificationEventRequest =
         NotificationEventRequest(
-            idempotencyKey = "moderation-case-ready:${event.data.caseId}",
+            idempotencyKey =
+                if (event.data.environment == null) "moderation-case-ready:${event.data.caseId}"
+                else
+                    "moderation-case-ready:v2:${event.data.environment.wireValue}:${event.data.caseId}",
             type = ModerationNotificationContent.TYPE,
             category = ModerationNotificationContent.CATEGORY,
             priority = "NORMAL",
@@ -524,7 +555,10 @@ class NotificationRepository(
             entity = NotificationEntity("CASE", event.data.caseId.toString()),
             title = ModerationNotificationContent.TITLE,
             body = ModerationNotificationContent.BODY,
-            data = objectMapper.createObjectNode(),
+            data =
+                objectMapper.createObjectNode().apply {
+                    event.data.environment?.let { put("environment", it.wireValue) }
+                },
             recipients = users.map(::NotificationRecipientRequest),
             actions =
                 listOf(
@@ -535,6 +569,7 @@ class NotificationRepository(
                             kind = NotificationActionKind.OPEN_PORTAL_CASE,
                             entityType = "CASE",
                             entityId = event.data.caseId.toString(),
+                            environment = event.data.environment,
                         )
                         .validated()
                 ),
@@ -709,10 +744,14 @@ class NotificationRepository(
             }
     }
 
-    private fun lockModerationCase(connection: Connection, caseId: UUID) {
+    private fun lockModerationCase(
+        connection: Connection,
+        caseId: UUID,
+        environment: ModerationEnvironment?,
+    ) {
         connection.prepareStatement("SELECT pg_advisory_xact_lock(hashtextextended(?, 0))").use {
             statement ->
-            statement.setString(1, caseId.toString())
+            statement.setString(1, "moderation-case:${environment?.wireValue ?: "legacy"}:$caseId")
             statement.executeQuery().use { resultSet -> check(resultSet.next()) }
         }
     }
@@ -720,19 +759,21 @@ class NotificationRepository(
     private fun findModerationProjection(
         connection: Connection,
         caseId: UUID,
+        environment: ModerationEnvironment?,
     ): ModerationProjection? =
         connection
             .prepareStatement(
                 """
                 SELECT notification_id, source_event_id, last_case_revision
                 FROM moderation_notification_projection
-                WHERE case_id = ? AND notification_type = ?
+                WHERE case_id = ? AND notification_type = ? AND environment IS NOT DISTINCT FROM ?
                 """
                     .trimIndent()
             )
             .use { statement ->
                 statement.setObject(1, caseId)
                 statement.setString(2, MODERATION_NOTIFICATION_TYPE)
+                statement.setString(3, environment?.wireValue)
                 statement.executeQuery().use { resultSet ->
                     if (resultSet.next()) {
                         ModerationProjection(
@@ -859,8 +900,8 @@ class NotificationRepository(
                     """
                     INSERT INTO notification_actions
                       (id, notification_id, action_key, label, style, command, payload,
-                       requires_fresh_check, action_kind, entity_type, entity_id)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                       requires_fresh_check, action_kind, entity_type, entity_id, environment)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """
                         .trimIndent()
                 )
@@ -876,6 +917,7 @@ class NotificationRepository(
                     statement.setString(9, action.kind.name)
                     statement.setString(10, action.entityType)
                     statement.setString(11, action.entityId)
+                    statement.setString(12, action.environment?.wireValue)
                     statement.executeUpdate()
                 }
         }
@@ -926,7 +968,7 @@ class NotificationRepository(
         connection
             .prepareStatement(
                 """
-                SELECT a.action_key, a.label, a.style, a.action_kind, a.entity_type, a.entity_id
+                SELECT a.action_key, a.label, a.style, a.action_kind, a.entity_type, a.entity_id, a.environment
                 FROM notification_actions a
                 WHERE a.notification_id = ?
                   AND NOT EXISTS (
@@ -958,6 +1000,8 @@ class NotificationRepository(
                                     ),
                                 entityType = resultSet.getString("entity_type"),
                                 entityId = resultSet.getString("entity_id"),
+                                environment =
+                                    ModerationEnvironment.parse(resultSet.getString("environment")),
                             )
                     }
                 } finally {
@@ -1063,7 +1107,7 @@ class NotificationRepository(
             .prepareStatement(
                 """
                 SELECT id, notification_id, action_key, command, payload::text,
-                       action_kind, entity_type, entity_id
+                       action_kind, entity_type, entity_id, environment
                 FROM notification_actions
                 WHERE notification_id = ? AND action_key = ?
                 FOR UPDATE
@@ -1152,6 +1196,7 @@ class NotificationRepository(
             kind = NotificationActionKind.valueOf(resultSet.getString("action_kind")),
             entityType = resultSet.getString("entity_type"),
             entityId = resultSet.getString("entity_id"),
+            environment = ModerationEnvironment.parse(resultSet.getString("environment")),
         )
 
     private fun PreparedStatement.setJson(index: Int, value: JsonNode) {
@@ -1162,5 +1207,16 @@ class NotificationRepository(
         private val LOG: Logger = Logger.getLogger(NotificationRepository::class.java)
         private const val UNIQUE_VIOLATION = "23505"
         private const val MODERATION_NOTIFICATION_TYPE = ModerationNotificationContent.TYPE
+        private val MINECRAFT_MODERATION_ENVIRONMENT_FILTER =
+            """
+            AND (n.type <> 'MODERATION_CASE_READY' OR NOT jsonb_exists(n.data, 'environment')
+                 OR n.data ->> 'environment' = ?)
+            AND NOT EXISTS (
+                SELECT 1 FROM notification_actions ma
+                WHERE ma.notification_id = n.id AND ma.action_kind = 'OPEN_PORTAL_CASE'
+                  AND ma.environment IS NOT NULL AND ma.environment IS DISTINCT FROM ?
+            )
+            """
+                .trimIndent()
     }
 }

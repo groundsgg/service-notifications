@@ -45,15 +45,20 @@ class ModerationMessageProcessor(
     private val metrics: ModerationNotificationMetrics? = null,
     private val state: ModerationConsumerState? = null,
     private val retryDelay: Duration = Duration.ofSeconds(5),
+    private val expectedEnvironment: ModerationEnvironment? = null,
+    private val lagObserver: ((Long) -> Unit)? = null,
     private val handler: ModerationReadyEventHandler,
 ) {
     fun process(message: ModerationIncomingMessage) {
         message.pendingCount?.let { pending ->
-            metrics?.updateConsumerLag(pending)
+            if (lagObserver == null) metrics?.updateConsumerLag(pending)
+            else lagObserver.invoke(pending)
             state?.updateLag(pending)
         }
         try {
             val event = validator.validate(message.subject, message.data)
+            if (event.data.environment != expectedEnvironment)
+                throw InvalidModerationEventException()
             handler.handle(event)
             message.ack()
         } catch (_: InvalidModerationEventException) {

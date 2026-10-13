@@ -9,8 +9,9 @@ import java.util.UUID
 @ApplicationScoped
 class ModerationEventValidator(private val objectMapper: ObjectMapper) {
     fun validate(subject: String, payload: ByteArray): ReportReadyForReviewEvent {
+        val environment = ModerationEnvironment.entries.firstOrNull { it.readySubject == subject }
         if (
-            subject != ModerationEventSubjects.REPORT_READY_FOR_REVIEW ||
+            (subject != ModerationEventSubjects.REPORT_READY_FOR_REVIEW && environment == null) ||
                 payload.isEmpty() ||
                 payload.size > MAX_EVENT_BYTES
         ) {
@@ -19,12 +20,21 @@ class ModerationEventValidator(private val objectMapper: ObjectMapper) {
         val root = runCatching { objectMapper.readTree(payload) }.getOrElse { invalid(it) }
         if (!root.isObject || root.fieldsSet() != ROOT_FIELDS) invalid()
         val data = root.path("data")
-        if (!data.isObject || data.fieldsSet() != DATA_FIELDS) invalid()
+        val expectedFields = if (environment == null) DATA_FIELDS else DATA_FIELDS + "environment"
+        if (!data.isObject || data.fieldsSet() != expectedFields) invalid()
+        if (environment != null && data.path("environment").text() != environment.wireValue)
+            invalid()
         if (root.path("eventType").text() != ModerationEventSubjects.REPORT_READY_FOR_REVIEW) {
             invalid()
         }
         val schemaVersion = root.path("schemaVersion")
-        if (!schemaVersion.isIntegralNumber || schemaVersion.asInt() != 1) invalid()
+        val expectedVersion = if (environment == null) 1 else 2
+        if (
+            !schemaVersion.isIntegralNumber ||
+                !schemaVersion.canConvertToInt() ||
+                schemaVersion.asInt() != expectedVersion
+        )
+            invalid()
         val captureStatus =
             when (data.path("captureStatus").text()) {
                 "COMPLETE" -> CaptureStatus.COMPLETE
@@ -38,7 +48,7 @@ class ModerationEventValidator(private val objectMapper: ObjectMapper) {
         return ReportReadyForReviewEvent(
             eventId = root.path("eventId").uuid(),
             eventType = ModerationEventSubjects.REPORT_READY_FOR_REVIEW,
-            schemaVersion = 1,
+            schemaVersion = expectedVersion,
             occurredAt = root.path("occurredAt").instant(),
             data =
                 ReportReadyForReviewData(
@@ -47,6 +57,7 @@ class ModerationEventValidator(private val objectMapper: ObjectMapper) {
                     evidenceCaptureId = data.path("evidenceCaptureId").uuid(),
                     captureStatus = captureStatus,
                     caseRevision = revision.asLong(),
+                    environment = environment,
                 ),
         )
     }

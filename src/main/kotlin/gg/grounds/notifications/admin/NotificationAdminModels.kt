@@ -1,5 +1,8 @@
 package gg.grounds.notifications.admin
 
+import com.fasterxml.jackson.annotation.JsonInclude
+import gg.grounds.notifications.moderation.ModerationEnvironment
+
 data class NotificationAdminDiagnosticsResponse(
     val notificationCount: Long,
     val recipientCount: Long,
@@ -31,6 +34,8 @@ data class ChannelClientAdminItem(
     val scopes: List<String>,
     val createdAt: String,
     val revokedAt: String?,
+    @get:JsonInclude(JsonInclude.Include.NON_NULL)
+    val moderationEnvironment: ModerationEnvironment? = null,
 )
 
 data class CreateChannelClientRequest(
@@ -39,6 +44,8 @@ data class CreateChannelClientRequest(
     val serverId: String? = null,
     val deploymentId: String? = null,
     val scopes: List<String>,
+    @get:JsonInclude(JsonInclude.Include.NON_NULL)
+    val moderationEnvironment: ModerationEnvironment? = null,
 )
 
 data class ChannelClientSecretResponse(val client: ChannelClientAdminItem, val token: String)

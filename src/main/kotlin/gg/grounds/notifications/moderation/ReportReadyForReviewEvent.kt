@@ -1,5 +1,6 @@
 package gg.grounds.notifications.moderation
 
+import com.fasterxml.jackson.annotation.JsonInclude
 import java.time.Instant
 import java.util.UUID
 
@@ -17,6 +18,7 @@ data class ReportReadyForReviewData(
     val evidenceCaptureId: UUID,
     val captureStatus: CaptureStatus,
     val caseRevision: Long,
+    @get:JsonInclude(JsonInclude.Include.NON_NULL) val environment: ModerationEnvironment? = null,
 )
 
 enum class CaptureStatus {
