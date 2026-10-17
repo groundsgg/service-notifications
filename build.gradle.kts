@@ -4,7 +4,7 @@ import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 
 plugins {
     id("gg.grounds.base-conventions") version "0.5.1"
-    id("io.quarkus") version "3.34.5"
+    alias(libs.plugins.quarkus)
 }
 
 kotlin { jvmToolchain(25) }
@@ -19,7 +19,7 @@ tasks.withType<JavaCompile>().configureEach { options.release.set(25) }
 tasks.withType<KotlinCompile>().configureEach { compilerOptions.jvmTarget.set(JvmTarget.JVM_25) }
 
 dependencies {
-    implementation(enforcedPlatform("io.quarkus.platform:quarkus-bom:3.34.5"))
+    implementation(enforcedPlatform(libs.quarkus.bom))
     implementation("io.quarkus:quarkus-arc")
     implementation("io.quarkus:quarkus-rest")
     implementation("io.quarkus:quarkus-rest-jackson")
