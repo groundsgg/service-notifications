@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.0](https://github.com/groundsgg/service-notifications/compare/service-notifications-v0.7.1...service-notifications-v0.8.0) (2026-10-17)
+
+
+### Features
+
+* **notifications:** isolate moderation delivery by environment ([#27](https://github.com/groundsgg/service-notifications/issues/27)) ([88d66a2](https://github.com/groundsgg/service-notifications/commit/88d66a25ca8b14ac9716731e77ab78b559b399d0))
+
 ## [0.7.1](https://github.com/groundsgg/service-notifications/compare/service-notifications-v0.7.0...service-notifications-v0.7.1) (2026-09-15)
 
 
