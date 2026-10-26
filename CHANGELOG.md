@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.8.0](https://github.com/groundsgg/service-notifications/compare/service-notifications-v0.7.1...service-notifications-v0.8.0) (2026-10-26)
+
+
+### Features
+
+* **auth:** verify the access token audience when configured ([#30](https://github.com/groundsgg/service-notifications/issues/30)) ([82bc978](https://github.com/groundsgg/service-notifications/commit/82bc9789ee3b6b8a6cf252c4b32c63cca6c1aa45))
+* **notifications:** isolate moderation delivery by environment ([#27](https://github.com/groundsgg/service-notifications/issues/27)) ([88d66a2](https://github.com/groundsgg/service-notifications/commit/88d66a25ca8b14ac9716731e77ab78b559b399d0))
+
 ## [0.7.1](https://github.com/groundsgg/service-notifications/compare/service-notifications-v0.7.0...service-notifications-v0.7.1) (2026-09-15)
 
 
