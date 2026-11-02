@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1.7
 FROM eclipse-temurin:25-jdk AS build
 
 ARG GITHUB_USER
@@ -15,10 +16,11 @@ RUN --mount=type=cache,target=/root/.gradle/caches,sharing=locked \
     --mount=type=secret,id=github_token,required=true \
     /bin/sh -euc '\
       : "${GITHUB_USER:?GITHUB_USER build arg is required}"; \
-      token="$(cat /run/secrets/github_token)"; \
+      umask 077; \
+      trap "rm -f /root/.gradle/gradle.properties" EXIT; \
+      printf "github.token=%s\n" "$(cat /run/secrets/github_token)" > /root/.gradle/gradle.properties; \
       ./gradlew --no-daemon --stacktrace \
         -Pgithub.user="${GITHUB_USER}" \
-        -Pgithub.token="${token}" \
         quarkusBuild -x test \
     '
 

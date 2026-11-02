@@ -55,7 +55,7 @@ def http(base, path, token=None, body=None, status=200):
         response = error
     with response:
         content = response.read()
-        assert response.status == status, f'{path}: expected {status}, got {response.status}: {content[:300]!r}'
+        assert response.status == status, f'{path}: expected {status}, got {response.status}'
         return json.loads(content) if content else None
 
 
@@ -241,7 +241,7 @@ def main():
             for path in ('channel-clients', 'recipients', 'action-results'):
                 assert http(a, '/v1/admin/notifications/' + path, token)['items'], path
             wait_for(lambda: sql("SELECT count(*) FROM notification_outbox WHERE status != 'processed';") == '0', 'outbox delivery')
-            print('Native Notifications contracts passed: JWT issuer/audience/identity, producer auth/idempotency, populated API, remote Minecraft identity/scope/action, persisted read/unread, cross-instance NATS live delivery, v1/Stage v2/Production v2 moderation projections, admin lists and outbox processing')
+            print('Packaged Notifications contracts passed: JWT issuer/audience/identity, producer auth/idempotency, populated API, remote Minecraft identity/scope/action, persisted read/unread, cross-instance NATS live delivery, v1/Stage v2/Production v2 moderation projections, admin lists and outbox processing')
         except BaseException:
             # Logs never include the private environment files or generated credential values.
             for name in containers:
