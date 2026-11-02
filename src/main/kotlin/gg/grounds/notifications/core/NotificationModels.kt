@@ -74,8 +74,7 @@ data class NotificationActionRequest(
 }
 
 // Returned through JAX-RS Response, so REST cannot infer its Native reflection metadata.
-@RegisterForReflection
-data class NotificationEventResponse(val id: UUID, val created: Boolean)
+@RegisterForReflection data class NotificationEventResponse(val id: UUID, val created: Boolean)
 
 data class NotificationInboxResponse(val items: List<NotificationInboxItem>)
 

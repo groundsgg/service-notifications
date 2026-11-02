@@ -6,7 +6,6 @@ is used. Runtime credentials live in private temporary files, never Docker argum
 """
 import base64
 import concurrent.futures
-import hashlib
 import json
 import os
 from pathlib import Path
@@ -164,13 +163,16 @@ def main():
             for invalid in (None, jwt(audience='wrong'), jwt(issuer='https://wrong.invalid')):
                 http(a, '/v1/notifications', invalid, status=401)
             http(a, '/v1/notifications?userId=someone-else', token, status=400)
-            producer, minecraft = (secrets.token_urlsafe(24) for _ in range(2))
             def sql(statement):
                 return docker('exec', '-i', db, 'psql', '-U', 'postgres', '-d', 'notifications', '-At', '-v', 'ON_ERROR_STOP=1', data=statement)
-            for channel, secret, scopes, server in [('api', producer, ['notifications:write'], None),
-                    ('minecraft', minecraft, ['minecraft.notifications.read', 'minecraft.notifications.action'], 'remote-proxy-b')]:
-                server_sql = "'" + server + "'" if server else 'NULL'
-                sql(f"INSERT INTO notification_channel_clients(id,channel,token_hash,scopes,server_id) VALUES ('{uuid.uuid4()}','{channel}','{hashlib.sha256(secret.encode()).hexdigest()}',ARRAY[{','.join(repr(s) for s in scopes)}],{server_sql});")
+            clients = []
+            for channel, scopes, server in [('api', ['notifications:write'], None),
+                    ('minecraft', ['minecraft.notifications.read', 'minecraft.notifications.action'], 'remote-proxy-b')]:
+                client = http(a, '/v1/admin/notifications/channel-clients', token,
+                              {'channel': channel, 'scopes': scopes, 'serverId': server}, 201)
+                assert client['client']['channel'] == channel and client['token'].startswith('gnc_')
+                clients.append(client)
+            producer, minecraft = [client['token'] for client in clients]
             request = {'idempotencyKey': 'native-contract', 'type': 'PROJECT_INVITE', 'category': 'PROJECT',
                        'priority': 'NORMAL', 'scope': {'type': 'server', 'id': 'remote-proxy-b'},
                        'actor': {'type': 'system'}, 'title': 'Native invitation', 'body': 'Populated contract',
