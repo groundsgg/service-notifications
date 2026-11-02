@@ -2,6 +2,7 @@ package gg.grounds.notifications.admin
 
 import com.fasterxml.jackson.annotation.JsonInclude
 import gg.grounds.notifications.moderation.ModerationEnvironment
+import io.quarkus.runtime.annotations.RegisterForReflection
 
 data class NotificationAdminDiagnosticsResponse(
     val notificationCount: Long,
@@ -48,6 +49,8 @@ data class CreateChannelClientRequest(
     val moderationEnvironment: ModerationEnvironment? = null,
 )
 
+// The create endpoint returns this DTO through an untyped JAX-RS Response.
+@RegisterForReflection
 data class ChannelClientSecretResponse(val client: ChannelClientAdminItem, val token: String)
 
 data class ChannelClientResponse(val client: ChannelClientAdminItem)

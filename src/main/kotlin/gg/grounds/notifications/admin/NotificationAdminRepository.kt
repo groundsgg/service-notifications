@@ -77,7 +77,7 @@ class NotificationAdminRepository(private val dataSource: DataSource) {
                 )
                 .use { statement ->
                     statement.executeQuery().useRows { resultSet ->
-                        buildList {
+                        arrayListOf<NotificationTypeAdminItem>().apply {
                             while (resultSet.next()) {
                                 add(
                                     NotificationTypeAdminItem(
@@ -113,7 +113,7 @@ class NotificationAdminRepository(private val dataSource: DataSource) {
                 )
                 .use { statement ->
                     statement.executeQuery().useRows { resultSet ->
-                        buildList {
+                        arrayListOf<ChannelClientAdminItem>().apply {
                             while (resultSet.next()) {
                                 add(resultSet.channelClientAdminItem())
                             }
@@ -279,7 +279,7 @@ class NotificationAdminRepository(private val dataSource: DataSource) {
             connection.prepareStatement(sql).use { statement ->
                 statement.bind(params + limit)
                 statement.executeQuery().useRows { resultSet ->
-                    buildList {
+                    arrayListOf<DeliveryAttemptAdminItem>().apply {
                         while (resultSet.next()) {
                             add(
                                 DeliveryAttemptAdminItem(
@@ -337,7 +337,7 @@ class NotificationAdminRepository(private val dataSource: DataSource) {
             connection.prepareStatement(sql).use { statement ->
                 statement.bind(params + limit)
                 statement.executeQuery().useRows { resultSet ->
-                    buildList {
+                    arrayListOf<ActionResultAdminItem>().apply {
                         while (resultSet.next()) {
                             add(
                                 ActionResultAdminItem(
@@ -389,7 +389,7 @@ class NotificationAdminRepository(private val dataSource: DataSource) {
             connection.prepareStatement(sql).use { statement ->
                 statement.bind(params + limit)
                 statement.executeQuery().useRows { resultSet ->
-                    buildList {
+                    arrayListOf<RecipientResolutionAdminItem>().apply {
                         while (resultSet.next()) {
                             add(
                                 RecipientResolutionAdminItem(
@@ -430,7 +430,7 @@ class NotificationAdminRepository(private val dataSource: DataSource) {
             connection.prepareStatement(sql).use { statement ->
                 statement.bind(params)
                 statement.executeQuery().useRows { resultSet ->
-                    buildList {
+                    arrayListOf<TeamNotificationDefaultAdminItem>().apply {
                         while (resultSet.next()) {
                             add(resultSet.teamNotificationDefaultAdminItem())
                         }
