@@ -3,6 +3,7 @@ package gg.grounds.notifications.core
 import com.fasterxml.jackson.annotation.JsonInclude
 import com.fasterxml.jackson.databind.JsonNode
 import gg.grounds.notifications.moderation.ModerationEnvironment
+import io.quarkus.runtime.annotations.RegisterForReflection
 import java.time.OffsetDateTime
 import java.util.UUID
 
@@ -72,6 +73,8 @@ data class NotificationActionRequest(
     }
 }
 
+// Returned through JAX-RS Response, so REST cannot infer its Native reflection metadata.
+@RegisterForReflection
 data class NotificationEventResponse(val id: UUID, val created: Boolean)
 
 data class NotificationInboxResponse(val items: List<NotificationInboxItem>)
