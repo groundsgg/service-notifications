@@ -106,7 +106,7 @@ def main():
     nats = None
     with tempfile.TemporaryDirectory(prefix='notifications-native-contract-') as temporary:
         directory = Path(temporary)
-        directory.chmod(0o755)  # only non-secret fixture files are mounted into the nonroot app
+        directory.chmod(0o700)
         def file(name, content, mode=0o600):
             path = directory / name
             path.write_text(content)
