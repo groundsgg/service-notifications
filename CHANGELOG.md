@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.0](https://github.com/groundsgg/service-notifications/compare/v0.9.0...v0.10.0) (2026-11-03)
+
+
+### Features
+
+* follow moderation case merge and split in canonical notifications ([#33](https://github.com/groundsgg/service-notifications/issues/33)) ([e9c1f1c](https://github.com/groundsgg/service-notifications/commit/e9c1f1c08c5ac70b840f04b2bd647e0ff871c4ef))
+
 ## [0.9.0](https://github.com/groundsgg/service-notifications/compare/v0.8.0...v0.9.0) (2026-11-02)
 
 
