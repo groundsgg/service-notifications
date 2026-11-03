@@ -1,0 +1,28 @@
+{
+  "eventId": "fd9f441c-b345-4b63-8e36-a75e816073a9",
+  "eventType": "moderation.case.restructured",
+  "schemaVersion": 2,
+  "occurredAt": "2026-11-03T12:00:00Z",
+  "data": {
+    "environment": "stage",
+    "operationId": "a659d91f-7fed-48a3-89dc-3893ff4c55ce",
+    "structureSequence": 42,
+    "kind": "MERGE",
+    "sourceCaseId": "c43b67c3-4345-4802-9230-c53abdb6433b",
+    "destinationCaseId": "71b75afe-076f-45de-82b2-ca449ac5ba45",
+    "sourceRevision": 3,
+    "destinationRevision": 7,
+    "chunkIndex": 0,
+    "chunkCount": 1,
+    "reports": [
+      {
+        "reportId": "c4c4a5bb-f390-4b2e-a086-964daed5aa00",
+        "caseId": "71b75afe-076f-45de-82b2-ca449ac5ba45",
+        "reportType": "PLAYER_REPORT",
+        "evidenceCaptureId": "0407d5b0-af81-42d7-a39f-f28f76e921de",
+        "captureStatus": "COMPLETE",
+        "readinessEventId": "c30b725f-72cd-4387-93c0-0346f09c8a3f"
+      }
+    ]
+  }
+}

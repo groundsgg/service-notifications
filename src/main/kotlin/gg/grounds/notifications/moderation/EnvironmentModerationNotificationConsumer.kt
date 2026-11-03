@@ -19,6 +19,7 @@ constructor(
     private val runtime: EnvironmentModerationNotificationRuntime,
     private val state: EnvironmentModerationConsumerState,
     private val metrics: ModerationNotificationMetrics? = null,
+    private val structureHandler: ModerationStructureEventHandler? = null,
 ) {
     private val subscriptions =
         mutableMapOf<ModerationEnvironment, EnvironmentModerationSubscription>()
@@ -52,6 +53,7 @@ constructor(
                                 state.updateLag(environment, lag)
                                 metrics?.updateConsumerLag(state.totalLag())
                             },
+                            structureHandler = structureHandler,
                             handler = handler,
                         )
                     subscriptions[environment] = subscriber.subscribe(binding, processor)

@@ -133,5 +133,5 @@ internal fun environmentModerationConsumerConfiguration(
     ConsumerConfiguration.builder()
         .durable(binding.consumerName)
         .ackPolicy(AckPolicy.Explicit)
-        .filterSubject(binding.subject)
+        .filterSubjects(binding.subjects)
         .build()

@@ -52,8 +52,11 @@ class EnvironmentModerationConsumerTest {
         assertEquals("MODERATION_READY_STAGE_V2", binding.streamName)
         assertEquals("service-notifications-moderation-ready-stage-v2", binding.consumerName)
         assertEquals(
-            "moderation-v2.stage.report.ready-for-review",
-            environmentModerationConsumerConfiguration(binding).filterSubject,
+            setOf(
+                "moderation-v2.stage.report.ready-for-review",
+                "moderation-v2.stage.case.restructured",
+            ),
+            environmentModerationConsumerConfiguration(binding).filterSubjects.orEmpty().toSet(),
         )
         assertTrue(state.snapshot(ModerationEnvironment.STAGE).connected)
         assertFalse(state.snapshot(ModerationEnvironment.PROD).enabled)
@@ -157,6 +160,32 @@ class EnvironmentModerationConsumerTest {
         assertEquals("degraded", data["prod.state"])
     }
 
+    @Test
+    fun `environment consumer wires the structure handler into its existing processor`() {
+        val runtime = EnvironmentModerationNotificationRuntime(true, false)
+        val remote = RecordingSubscriber()
+        val calls = mutableListOf<String>()
+        val consumer =
+            EnvironmentModerationNotificationConsumer(
+                mapper,
+                ModerationReadyEventHandler { error("Wrong handler") },
+                remote,
+                runtime,
+                EnvironmentModerationConsumerState(runtime),
+                structureHandler = ModerationStructureEventHandler { calls.add("structure") },
+            )
+        consumer.start(StartupEvent())
+        val payload =
+            javaClass.classLoader
+                .getResourceAsStream("moderation/v2/moderation.case.restructured.json")!!
+                .use { it.readAllBytes() }
+        remote.processors
+            .getValue(ModerationEnvironment.STAGE)
+            .process(RecordingMessage("moderation-v2.stage.case.restructured", payload, calls))
+        assertEquals(listOf("structure", "ack"), calls)
+        consumer.close()
+    }
+
     private class RecordingMessage(
         override val subject: String,
         override val data: ByteArray,
@@ -177,6 +206,7 @@ class EnvironmentModerationConsumerTest {
 
     private class RecordingSubscriber : EnvironmentModerationSubscriber {
         val attempts = mutableListOf<ModerationEnvironment>()
+        val processors = mutableMapOf<ModerationEnvironment, ModerationMessageProcessor>()
         var failStage = false
 
         override fun subscribe(
@@ -184,6 +214,7 @@ class EnvironmentModerationConsumerTest {
             processor: ModerationMessageProcessor,
         ): EnvironmentModerationSubscription {
             attempts += binding.environment
+            processors[binding.environment] = processor
             if (failStage && binding.environment == ModerationEnvironment.STAGE)
                 throw IllegalStateException("fixture")
             return object : EnvironmentModerationSubscription {

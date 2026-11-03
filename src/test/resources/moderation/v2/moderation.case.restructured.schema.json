@@ -1,0 +1,150 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://api.grounds.gg/schemas/moderation/events/v2/moderation.case.restructured.schema.json",
+  "title": "Environment-bound moderation case restructuring event v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "eventId",
+    "eventType",
+    "schemaVersion",
+    "occurredAt",
+    "data"
+  ],
+  "properties": {
+    "eventId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "eventType": {
+      "const": "moderation.case.restructured"
+    },
+    "schemaVersion": {
+      "const": 2
+    },
+    "occurredAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "data": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "environment",
+        "operationId",
+        "structureSequence",
+        "kind",
+        "sourceCaseId",
+        "destinationCaseId",
+        "sourceRevision",
+        "destinationRevision",
+        "chunkIndex",
+        "chunkCount",
+        "reports"
+      ],
+      "properties": {
+        "environment": {
+          "enum": [
+            "stage",
+            "prod"
+          ]
+        },
+        "operationId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "structureSequence": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "kind": {
+          "enum": [
+            "MERGE",
+            "SPLIT"
+          ]
+        },
+        "sourceCaseId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "destinationCaseId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "sourceRevision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "destinationRevision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "chunkIndex": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 2147483646
+        },
+        "chunkCount": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2147483647
+        },
+        "reports": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "reportId",
+              "caseId",
+              "reportType",
+              "evidenceCaptureId",
+              "captureStatus",
+              "readinessEventId"
+            ],
+            "properties": {
+              "reportId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "caseId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "reportType": {
+                "enum": [
+                  "PLAYER_REPORT",
+                  "SYSTEM_MESSAGE_REPORT"
+                ]
+              },
+              "evidenceCaptureId": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "uuid"
+              },
+              "captureStatus": {
+                "enum": [
+                  "OPEN",
+                  "COMPLETE",
+                  "INCOMPLETE",
+                  null
+                ]
+              },
+              "readinessEventId": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "uuid"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

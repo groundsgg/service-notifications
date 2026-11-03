@@ -62,6 +62,9 @@ class ModerationEventValidator(private val objectMapper: ObjectMapper) {
         )
     }
 
+    fun validateStructure(subject: String, payload: ByteArray): CaseStructureNotificationEvent =
+        CaseStructureEventValidator(objectMapper).validate(subject, payload)
+
     private fun JsonNode.fieldsSet(): Set<String> = fieldNames().asSequence().toSet()
 
     private fun JsonNode.text(): String {
