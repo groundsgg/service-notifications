@@ -70,6 +70,19 @@ class ModerationNotificationMetrics(private val registry: MeterRegistry) {
         }
     }
 
+    fun recordStructure(kind: CaseStructureKind, result: CaseStructureProjectionResult) {
+        Counter.builder("notifications.moderation.structure.projection")
+            .description("Canonical case routing event results")
+            .tag("operation", kind.name.lowercase())
+            .tag(
+                "result",
+                if (result.replay) "replay" else if (result.complete) "complete" else "incomplete",
+            )
+            .register(registry)
+            .increment()
+        if (result.replay) deduplicated.increment()
+    }
+
     fun recordRetry(reason: ModerationRetryReason) {
         Counter.builder("notifications.moderation.retry")
             .description("Moderation notification event retries")

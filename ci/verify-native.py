@@ -131,7 +131,7 @@ def main():
                         ('MODERATION_READY_STAGE_V2', 'moderation-v2.stage.report.ready-for-review'),
                         ('MODERATION_READY_PROD_V2', 'moderation-v2.prod.report.ready-for-review')]
             for stream, subject in bindings:
-                nats.request('$JS.API.STREAM.CREATE.' + stream, {'name': stream, 'subjects': [subject], 'storage': 'memory'})
+                nats.request('$JS.API.STREAM.CREATE.' + stream, {'name': stream, 'subjects': [subject] + ([subject.replace('report.ready-for-review', 'case.restructured')] if stream != 'MODERATION' else []), 'storage': 'memory'})
             run(forge, '--network-alias', 'forge', '--env-file', file('forge.env', f'FORGE_TOKEN={forge_token}\n'),
                 '-v', str(ROOT / 'ci/forge-fixture.py') + ':/fixture.py:ro', 'python:3.13-alpine', 'python', '/fixture.py')
             public = file('publicKey.pem', (ROOT / 'src/test/resources/jwt/publicKey.pem').read_text(), 0o644)
@@ -169,7 +169,8 @@ def main():
             for channel, scopes, server in [('api', ['notifications:write'], None),
                     ('minecraft', ['minecraft.notifications.read', 'minecraft.notifications.action'], 'remote-proxy-b')]:
                 client = http(a, '/v1/admin/notifications/channel-clients', token,
-                              {'channel': channel, 'scopes': scopes, 'serverId': server}, 201)
+                              {'channel': channel, 'scopes': scopes, 'serverId': server,
+                               **({'moderationEnvironment': 'stage'} if channel == 'minecraft' else {})}, 201)
                 assert client['client']['channel'] == channel and client['token'].startswith('gnc_')
                 clients.append(client)
             producer, minecraft = [client['token'] for client in clients]
@@ -220,6 +221,7 @@ def main():
             assert action['status'] == 'succeeded'
             assert http(a, f'/v1/notifications/{notification}/actions/accept', token, {})['status'] == 'succeeded'
             assert sql('SELECT count(*) FROM notification_action_results;') == '1'
+            moderation_cases = {}
             for index, (stream, subject) in enumerate(bindings):
                 environment_name = (None, 'stage', 'prod')[index]
                 case_id = str(uuid.uuid4())
@@ -235,15 +237,91 @@ def main():
                                  if i['type'] == 'MODERATION_CASE_READY'
                                  and i['actions'][0]['entityId'] == case_id), None)
                 projected_item = wait_for(projected, 'moderation ' + stream)
+                moderation_cases[environment_name] = (payload, projected_item)
                 assert projected_item['actions'][0]['kind'] == 'OPEN_PORTAL_CASE'
                 assert projected_item['actions'][0].get('environment') == environment_name
                 http(a, f"/v1/notifications/{projected_item['id']}/actions/open_case", token, {}, 409)
                 nats.request(subject, payload)
             assert len(http(b, '/v1/notifications', token)['items']) == 4
+            # Real typed NATS consumer shared by two packaged processes, with persisted aliases.
+            stage_ready, stage_item = moderation_cases['stage']
+            destination = json.loads(json.dumps(stage_ready))
+            destination['eventId'] = str(uuid.uuid4())
+            destination['data'].update(reportId=str(uuid.uuid4()), caseId=str(uuid.uuid4()),
+                                       evidenceCaptureId=str(uuid.uuid4()))
+            nats.request(bindings[1][1], destination)
+            def inbox(base=a):
+                return http(base, '/v1/notifications', token)['items']
+            def case_ids(base=a):
+                return {i['actions'][0]['entityId'] for i in inbox(base)
+                        if i['type'] == 'MODERATION_CASE_READY' and i['actions'][0].get('environment') == 'stage'}
+            source_case, destination_case = stage_ready['data']['caseId'], destination['data']['caseId']
+            wait_for(lambda: case_ids() == {source_case, destination_case}, 'second Stage canonical notification')
+            def routing(ready, case):
+                return {key: ready['data'][key] for key in ('reportId', 'evidenceCaptureId', 'captureStatus')} | {
+                    'caseId': case, 'reportType': 'PLAYER_REPORT', 'readinessEventId': ready['eventId']}
+            merged = {'eventId': str(uuid.uuid4()), 'eventType': 'moderation.case.restructured', 'schemaVersion': 2,
+                      'occurredAt': '2026-11-03T12:00:00Z', 'data': {
+                          'environment': 'stage', 'operationId': str(uuid.uuid4()), 'structureSequence': 1,
+                          'kind': 'MERGE', 'sourceCaseId': source_case, 'destinationCaseId': destination_case,
+                          'sourceRevision': 2, 'destinationRevision': 2, 'chunkIndex': 0, 'chunkCount': 1,
+                          'reports': [routing(stage_ready, destination_case), routing(destination, destination_case)]}}
+            subject = 'moderation-v2.stage.case.restructured'
+            def live_structure():
+                req = urllib.request.Request(b + '/v1/notifications/live', headers={'Authorization': 'Bearer ' + token})
+                with urllib.request.urlopen(req, timeout=35) as response:
+                    for line in response:
+                        if line.startswith(b'data:'):
+                            event = json.loads(line[5:])
+                            if event.get('reason') == 'audience_changed' and event.get('notificationId') == stage_item['id']:
+                                return event
+                raise AssertionError('No cross-instance canonical retirement event')
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                future = executor.submit(live_structure)
+                time.sleep(1)
+                nats.request(subject, merged)
+                assert future.result(timeout=40)['userId'] == USER
+            wait_for(lambda: case_ids(a) == case_ids(b) == {destination_case}, 'merged navigation on both instances')
+            original_id = stage_item['id']
+            assert sql(f"SELECT entity_id FROM notification_actions WHERE notification_id='{original_id}';") == source_case
+            batch = http(b, '/v1/channel/minecraft/notifications/batch', minecraft,
+                         {'serverId': 'remote-proxy-b', 'playerUuids': [player]})
+            stage_pulled = [i for i in batch['players'][0]['notifications'] if i['type'] == 'MODERATION_CASE_READY'
+                            and i['actions'][0].get('environment') == 'stage']
+            assert {i['actions'][0]['entityId'] for i in stage_pulled} == {destination_case}
+            split_case = str(uuid.uuid4())
+            split = json.loads(json.dumps(merged))
+            split['eventId'] = str(uuid.uuid4())
+            split['data'].update(operationId=str(uuid.uuid4()), structureSequence=2, kind='SPLIT',
+                                 sourceCaseId=destination_case, destinationCaseId=split_case,
+                                 sourceRevision=3, destinationRevision=2,
+                                 reports=[routing(stage_ready, split_case), routing(destination, destination_case)])
+            nats.request(subject, split)
+            wait_for(lambda: case_ids(a) == case_ids(b) == {destination_case, split_case}, 'split navigation on both instances')
+            assert len(inbox()) == 5
+            for environment_name in (None, 'prod'):
+                old_payload, old_item = moderation_cases[environment_name]
+                current = next(i for i in inbox() if i['id'] == old_item['id'])
+                assert current['actions'][0]['entityId'] == old_payload['data']['caseId']
+                assert current['actions'][0].get('environment') == environment_name
+            before = sql('SELECT count(*) FROM notifications;')
+            outbox_before = sql('SELECT count(*) FROM notification_outbox;')
+            for payload in (merged, split):
+                nats.request(subject, payload)
+            nats.request(bindings[1][1], stage_ready)
+            # Wait for consumer ACK floor, rather than treating a publish ACK as projection completion.
+            def acked():
+                info = nats.request('$JS.API.CONSUMER.INFO.MODERATION_READY_STAGE_V2.service-notifications-moderation-ready-stage-v2', {})
+                return info['num_ack_pending'] == 0 and info['num_pending'] == 0 and info['ack_floor']['stream_seq'] >= 8
+            wait_for(acked, 'structure and old readiness replay acknowledgements')
+            assert sql('SELECT count(*) FROM notifications;') == before
+            assert sql('SELECT count(*) FROM notification_outbox;') == outbox_before
+            assert sql('SELECT count(*) FROM moderation_structure_operation;') == '2'
+            assert sql('SELECT count(*) FROM moderation_structure_received_event;') == '2'
             for path in ('channel-clients', 'recipients', 'action-results'):
                 assert http(a, '/v1/admin/notifications/' + path, token)['items'], path
             wait_for(lambda: sql("SELECT count(*) FROM notification_outbox WHERE status != 'processed';") == '0', 'outbox delivery')
-            print('Packaged Notifications contracts passed: JWT issuer/audience/identity, producer auth/idempotency, populated API, remote Minecraft identity/scope/action, persisted read/unread, cross-instance NATS live delivery, v1/Stage v2/Production v2 moderation projections, admin lists and outbox processing')
+            print('Packaged Notifications contracts passed: JWT issuer/audience/identity, producer auth/idempotency, populated API, remote Minecraft identity/scope/action, persisted read/unread, cross-instance NATS live delivery, v1/Stage v2/Production v2 moderation projections, two-instance typed merge/split with canonical inbox/live/pull navigation and replay, admin lists and outbox processing')
         except BaseException:
             # Logs never include the private environment files or generated credential values.
             for name in containers:

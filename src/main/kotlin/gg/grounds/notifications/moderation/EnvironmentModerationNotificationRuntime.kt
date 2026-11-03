@@ -12,6 +12,9 @@ data class EnvironmentModerationBinding(val environment: ModerationEnvironment) 
 
     val subject: String
         get() = environment.readySubject
+
+    val subjects: List<String>
+        get() = listOf(subject, environment.structureSubject())
 }
 
 @ApplicationScoped

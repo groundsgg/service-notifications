@@ -15,12 +15,16 @@ import gg.grounds.notifications.core.NotificationInboxItem
 import gg.grounds.notifications.core.NotificationRecipientRequest
 import gg.grounds.notifications.core.NotificationScope
 import gg.grounds.notifications.core.StoredNotificationAction
+import gg.grounds.notifications.moderation.CaseNavigationRepository
+import gg.grounds.notifications.moderation.CaseStructureNotificationEvent
+import gg.grounds.notifications.moderation.CaseStructureProjectionResult
 import gg.grounds.notifications.moderation.EnvironmentModerationEventLedger
 import gg.grounds.notifications.moderation.ModerationEnvironment
 import gg.grounds.notifications.moderation.ModerationNotificationContent
 import gg.grounds.notifications.moderation.ModerationProjectionResult
 import gg.grounds.notifications.moderation.ModerationProjectionStatus
 import gg.grounds.notifications.moderation.ModerationProjectionStore
+import gg.grounds.notifications.moderation.ModerationStructureProjectionStore
 import gg.grounds.notifications.moderation.ReportReadyForReviewEvent
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.ws.rs.ForbiddenException
@@ -42,23 +46,136 @@ class NotificationRepository(
     private val dataSource: DataSource,
     private val objectMapper: ObjectMapper,
     private val eventLedger: EnvironmentModerationEventLedger,
-) : ModerationProjectionStore {
+    private val navigation: CaseNavigationRepository,
+) : ModerationProjectionStore, ModerationStructureProjectionStore {
     override fun findProcessedModerationEvent(
         event: ReportReadyForReviewEvent
-    ): ModerationProjectionResult? =
-        dataSource.connection.use { connection ->
-            eventLedger.findProcessed(connection, event)
-                ?: if (event.data.environment == null)
-                    findModerationProjection(connection, event.data.caseId, null)
-                        ?.terminalResultFor(event)
-                else null
+    ): ModerationProjectionResult? {
+        eventLedger.verifyVersion(event)
+        return transaction { c ->
+            event.data.environment?.let { navigation.lock(c, it) }
+            eventLedger.lock(c, event)
+            val result =
+                eventLedger.findProcessed(c, event)
+                    ?: if (event.data.environment == null)
+                        findModerationProjection(c, event.data.caseId, null)
+                            ?.terminalResultFor(event)
+                    else null
+            // Old, already processed v2 events can populate their missing routing facts.
+            // Validate their immutable fingerprint before learning anything.
+            if (result != null && event.data.environment != null) navigation.observeReady(c, event)
+            result
         }
+    }
 
     override fun projectModerationCase(
         event: ReportReadyForReviewEvent,
         audience: ForgeAudienceSnapshot,
     ): ModerationProjectionResult {
         eventLedger.verifyVersion(event)
+        checkedAudience(audience)
+        return transaction { c ->
+            event.data.environment?.let { navigation.lock(c, it) }
+            eventLedger.lock(c, event)
+            eventLedger.findProcessed(c, event)?.let {
+                event.data.environment?.let { _ -> navigation.observeReady(c, event) }
+                return@transaction it
+            }
+            val effective =
+                if (event.data.environment == null) event else navigation.observeReady(c, event)
+            val result = projectCurrentCase(c, effective, audience)
+            // The receipt fingerprints the original received envelope, not the routing projection.
+            eventLedger.record(c, event, result)
+            result
+        }
+    }
+
+    override fun findProcessedCaseStructure(
+        event: CaseStructureNotificationEvent
+    ): CaseStructureProjectionResult? =
+        dataSource.connection.use { navigation.processed(it, event) }
+
+    override fun projectCaseStructure(
+        event: CaseStructureNotificationEvent,
+        audience: ForgeAudienceSnapshot,
+    ): CaseStructureProjectionResult {
+        checkedAudience(audience)
+        return transaction { c ->
+            val env = event.data.environment
+            navigation.lock(c, env, true)
+            navigation.accept(c, event)?.let {
+                return@transaction it
+            }
+            val reports = navigation.reports(c, event)
+            val roots = navigation.apply(c, event, reports)
+            val notifications =
+                roots.mapNotNull { root ->
+                    navigation.readyFor(c, env, root, event)?.let {
+                        projectCurrentCase(c, it, audience).notificationId
+                    }
+                }
+            // Superseded canonical cases leave the active inbox, retaining every
+            // notification, original action, archived recipient and delivery row.
+            val projections =
+                c.prepareStatement(
+                        """SELECT notification_id,case_id FROM moderation_notification_projection
+                WHERE environment=? AND moderation_notification_leader(environment,case_id)=ANY(?)"""
+                    )
+                    .use { q ->
+                        q.setString(1, env.wireValue)
+                        q.setArray(2, c.createArrayOf("uuid", roots.toTypedArray()))
+                        q.executeQuery().use { r ->
+                            buildList {
+                                while (r.next()) add(
+                                    r.getObject(1, UUID::class.java) to
+                                        r.getObject(2, UUID::class.java)
+                                )
+                            }
+                        }
+                    }
+            projections.forEach { (id, original) ->
+                if (
+                    navigation.leader(c, env, original) != original ||
+                        navigation.readyFor(c, env, original, event) == null
+                ) {
+                    val users = activeRecipientUserIds(c, id)
+                    if (users.isNotEmpty()) {
+                        replaceModerationAudience(c, id, emptyList())
+                        insertModerationOutboxEvent(c, id, users, "audience_changed")
+                    }
+                }
+            }
+            navigation.finish(c, event, notifications)
+        }
+    }
+
+    private fun projectCurrentCase(
+        c: Connection,
+        event: ReportReadyForReviewEvent,
+        audience: ForgeAudienceSnapshot,
+    ): ModerationProjectionResult {
+        val (fingerprint, users) = checkedAudience(audience)
+        lockModerationCase(c, event.data.caseId, event.data.environment)
+        val existing = findModerationProjection(c, event.data.caseId, event.data.environment)
+        existing?.terminalResultFor(event)?.let {
+            return it
+        }
+        val result =
+            if (existing == null) createModerationProjection(c, event, audience, fingerprint, users)
+            else updateModerationProjection(c, existing, event, audience, fingerprint, users)
+        if (event.data.environment != null)
+            c.prepareStatement(
+                    "UPDATE moderation_notification_projection SET navigation_report_id=? WHERE notification_id=?"
+                )
+                .use {
+                    it.setObject(1, event.data.reportId)
+                    it.setObject(2, result.notificationId)
+                    check(it.executeUpdate() == 1)
+                }
+        return result
+    }
+
+    private fun checkedAudience(audience: ForgeAudienceSnapshot): Pair<ByteArray, List<String>> {
         val fingerprint =
             runCatching { HexFormat.of().parseHex(audience.fingerprint) }
                 .getOrElse { throw IllegalArgumentException("Audience fingerprint is invalid", it) }
@@ -67,43 +184,28 @@ class NotificationRepository(
         require(users == audience.userIds && users.all { it.isNotBlank() }) {
             "Moderation audience must be sorted, unique, and non-blank"
         }
-        return dataSource.connection.use { connection ->
-            connection.autoCommit = false
+        return fingerprint to users
+    }
+
+    private fun <T> transaction(block: (Connection) -> T): T =
+        dataSource.connection.use { c ->
+            c.autoCommit = false
             try {
-                eventLedger.lock(connection, event)
-                eventLedger.findProcessed(connection, event)?.let { result ->
-                    connection.commit()
-                    return@use result
-                }
-                lockModerationCase(connection, event.data.caseId, event.data.environment)
-                val existing =
-                    findModerationProjection(connection, event.data.caseId, event.data.environment)
-                existing?.terminalResultFor(event)?.let { result ->
-                    eventLedger.record(connection, event, result)
-                    connection.commit()
-                    return@use result
-                }
-                val result =
-                    if (existing == null) {
-                        createModerationProjection(connection, event, audience, fingerprint, users)
-                    } else {
-                        updateModerationProjection(
-                            connection,
-                            existing,
-                            event,
-                            audience,
-                            fingerprint,
-                            users,
-                        )
-                    }
-                eventLedger.record(connection, event, result)
-                connection.commit()
+                val result = block(c)
+                c.commit()
                 result
-            } catch (exception: Exception) {
-                connection.rollback()
-                throw exception
+            } catch (e: Exception) {
+                c.rollback()
+                throw e
             }
         }
+
+    private fun <T> inboxRead(
+        environments: List<ModerationEnvironment>,
+        query: (Connection) -> T,
+    ): T = transaction { c ->
+        environments.forEach { navigation.lock(c, it) }
+        query(c)
     }
 
     fun createEvent(request: NotificationEventRequest): NotificationEventResponse {
@@ -148,7 +250,7 @@ class NotificationRepository(
         scopeId: String,
         moderationEnvironment: ModerationEnvironment? = null,
     ): List<NotificationInboxItem> =
-        dataSource.connection.use { connection ->
+        inboxRead(moderationEnvironment?.let { listOf(it) }.orEmpty()) { connection ->
             connection
                 .prepareStatement(
                     """
@@ -177,7 +279,7 @@ class NotificationRepository(
         }
 
     fun listForUser(userId: String): List<NotificationInboxItem> =
-        dataSource.connection.use { connection ->
+        inboxRead(ModerationEnvironment.entries) { connection ->
             connection
                 .prepareStatement(
                     """
@@ -290,7 +392,7 @@ class NotificationRepository(
                 .prepareStatement(
                     """
                     SELECT id, notification_id, action_key, command, payload::text,
-                           action_kind, entity_type, entity_id, environment
+                           action_kind, entity_type, CASE WHEN action_kind='OPEN_PORTAL_CASE' AND environment IS NOT NULL THEN moderation_notification_action_case(environment,notification_id,entity_id::uuid)::text ELSE entity_id END AS entity_id, environment
                     FROM notification_actions
                     WHERE notification_id = ? AND action_key = ?
                     """
@@ -968,7 +1070,7 @@ class NotificationRepository(
         connection
             .prepareStatement(
                 """
-                SELECT a.action_key, a.label, a.style, a.action_kind, a.entity_type, a.entity_id, a.environment
+                SELECT a.action_key, a.label, a.style, a.action_kind, a.entity_type, CASE WHEN a.action_kind='OPEN_PORTAL_CASE' AND a.environment IS NOT NULL THEN moderation_notification_action_case(a.environment,a.notification_id,a.entity_id::uuid)::text ELSE a.entity_id END AS entity_id, a.environment
                 FROM notification_actions a
                 WHERE a.notification_id = ?
                   AND NOT EXISTS (
@@ -1107,7 +1209,7 @@ class NotificationRepository(
             .prepareStatement(
                 """
                 SELECT id, notification_id, action_key, command, payload::text,
-                       action_kind, entity_type, entity_id, environment
+                       action_kind, entity_type, CASE WHEN action_kind='OPEN_PORTAL_CASE' AND environment IS NOT NULL THEN moderation_notification_action_case(environment,notification_id,entity_id::uuid)::text ELSE entity_id END AS entity_id, environment
                 FROM notification_actions
                 WHERE notification_id = ? AND action_key = ?
                 FOR UPDATE

@@ -47,6 +47,7 @@ class ModerationMessageProcessor(
     private val retryDelay: Duration = Duration.ofSeconds(5),
     private val expectedEnvironment: ModerationEnvironment? = null,
     private val lagObserver: ((Long) -> Unit)? = null,
+    private val structureHandler: ModerationStructureEventHandler? = null,
     private val handler: ModerationReadyEventHandler,
 ) {
     fun process(message: ModerationIncomingMessage) {
@@ -56,10 +57,22 @@ class ModerationMessageProcessor(
             state?.updateLag(pending)
         }
         try {
-            val event = validator.validate(message.subject, message.data)
-            if (event.data.environment != expectedEnvironment)
-                throw InvalidModerationEventException()
-            handler.handle(event)
+            if (ModerationEnvironment.entries.any { it.structureSubject() == message.subject }) {
+                val event = validator.validateStructure(message.subject, message.data)
+                if (event.data.environment != expectedEnvironment)
+                    throw InvalidModerationEventException()
+                val target =
+                    structureHandler
+                        ?: throw RetryableModerationNotificationException(
+                            "Case routing handler is unavailable"
+                        )
+                target.handle(event)
+            } else {
+                val event = validator.validate(message.subject, message.data)
+                if (event.data.environment != expectedEnvironment)
+                    throw InvalidModerationEventException()
+                handler.handle(event)
+            }
             message.ack()
         } catch (_: InvalidModerationEventException) {
             metrics?.recordFailure(ModerationFailureReason.INVALID_EVENT)
