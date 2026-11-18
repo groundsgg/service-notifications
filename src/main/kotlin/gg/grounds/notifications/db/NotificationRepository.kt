@@ -209,6 +209,17 @@ class NotificationRepository(
     }
 
     fun createEvent(request: NotificationEventRequest): NotificationEventResponse {
+        fun reservedAction(value: String?) =
+            value
+                ?.replace("_", "")
+                ?.replace("-", "")
+                ?.equals("OpenSafetySignal", ignoreCase = true) == true
+        if (
+            request.type.trim().equals("MODERATION_SAFETY_SIGNAL", ignoreCase = true) ||
+                request.actions.any { reservedAction(it.actionKey) || reservedAction(it.command) }
+        ) {
+            throw jakarta.ws.rs.BadRequestException("Reserved notification")
+        }
         require(request.recipients.isNotEmpty()) { "At least one recipient is required" }
         request.actions.forEach { it.validated() }
 

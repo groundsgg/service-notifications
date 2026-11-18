@@ -27,7 +27,7 @@ import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 
 @QuarkusTest
-@QuarkusTestResource(FakeForgeActionServer::class)
+@QuarkusTestResource(value = FakeForgeActionServer::class, restrictToAnnotatedClass = true)
 class ProjectInviteActionResourceTest {
     @Inject lateinit var dataSource: DataSource
 

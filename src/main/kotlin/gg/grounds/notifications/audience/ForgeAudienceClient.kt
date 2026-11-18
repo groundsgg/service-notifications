@@ -66,6 +66,9 @@ constructor(
                 URI.create(baseUrl.trimEnd('/') + "/v1/internal/notification-audiences/resolve")
             }
             .getOrElse { throw IllegalArgumentException("Forge audience base URL is invalid", it) }
+    private val safetyEndpoint by lazy {
+        URI.create(baseUrl.trimEnd('/') + "/v1/internal/moderation-safety-audiences/resolve")
+    }
     private val httpClient = HttpClient.newBuilder().connectTimeout(connectTimeout).build()
 
     init {
@@ -149,6 +152,49 @@ constructor(
                 String(bytes, StandardCharsets.UTF_8)
             }
         return parseSnapshot(body)
+    }
+
+    internal fun requestSafetyAudience(payload: ByteArray): ByteArray {
+        require(
+            internalToken.isNotBlank() &&
+                safetyEndpoint.scheme in setOf("http", "https") &&
+                safetyEndpoint.host != null &&
+                safetyEndpoint.userInfo == null &&
+                safetyEndpoint.query == null &&
+                safetyEndpoint.fragment == null
+        )
+        val timeout = readTimeout.coerceAtMost(Duration.ofSeconds(4))
+        val request =
+            HttpRequest.newBuilder(safetyEndpoint)
+                .timeout(timeout)
+                .header("Authorization", "Bearer $internalToken")
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofByteArray(payload))
+                .build()
+        val future =
+            httpClient.sendAsync(
+                request,
+                HttpResponse.BodyHandlers.limiting(
+                    HttpResponse.BodyHandlers.ofByteArray(),
+                    96L * 1024,
+                ),
+            )
+        try {
+            val response =
+                future.get(timeout.toMillis(), java.util.concurrent.TimeUnit.MILLISECONDS)
+            check(response.statusCode() == 200)
+            return response.body()
+        } catch (e: InterruptedException) {
+            Thread.currentThread().interrupt()
+            throw e
+        } finally {
+            if (!future.isDone) future.cancel(true)
+        }
+    }
+
+    @jakarta.annotation.PreDestroy
+    fun close() {
+        httpClient.shutdownNow()
     }
 
     private fun parseSnapshot(body: String): ForgeAudienceSnapshot {
