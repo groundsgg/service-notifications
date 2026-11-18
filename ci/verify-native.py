@@ -4,6 +4,7 @@
 The only fake is the external Forge HTTP boundary; no test profile or in-process service
 is used. Runtime credentials live in private temporary files, never Docker arguments.
 """
+from datetime import datetime, timezone
 import base64
 import concurrent.futures
 import json
@@ -42,8 +43,8 @@ def wait_for(check, description, timeout=65):
     raise AssertionError(f'Timed out: {description}; last error: {last}')
 
 
-def http(base, path, token=None, body=None, status=200):
-    headers = {'Content-Type': 'application/json'}
+def http(base, path, token=None, body=None, status=200, extra_headers=None):
+    headers = {'Content-Type': 'application/json', **(extra_headers or {})}
     if token:
         headers['Authorization'] = 'Bearer ' + token
     request = urllib.request.Request(base + path, headers=headers,
@@ -116,7 +117,7 @@ def main():
             return docker('run', '-d', '--name', name, '--network', network, *args)
         def port(name, internal):
             return docker('port', name, str(internal) + '/tcp').rsplit(':', 1)[1]
-        db_password, nats_token, forge_token = (secrets.token_urlsafe(24) for _ in range(3))
+        db_password, nats_token, forge_token, safety_token = (secrets.token_urlsafe(32) for _ in range(4))
         try:
             docker('network', 'create', network)
             db, broker, forge = network + '-db', network + '-nats', network + '-forge'
@@ -148,6 +149,7 @@ def main():
                 'NOTIFICATIONS_NATS_AUTHENTICATION_MODE=token-file',
                 'NOTIFICATIONS_MODERATION_PROJECTOR_ENABLED=true',
                 'NOTIFICATIONS_MODERATION_PROJECTOR_STAGE_ENABLED=true',
+                'NOTIFICATIONS_SAFETY_STAGE_ENABLED=true', f'NOTIFICATIONS_SAFETY_STAGE_PRODUCER_TOKEN={safety_token}',
                 'NOTIFICATIONS_MODERATION_PROJECTOR_PROD_ENABLED=true',
             ]) + '\n')
             bases = []
@@ -159,6 +161,22 @@ def main():
                 wait_for(lambda: http(base, '/q/health/ready')['status'] == 'UP', 'ready instance ' + suffix)
                 bases.append(base)
             a, b = bases
+            safety_user = jwt('02400000-0000-4000-8000-000000000001')
+            safety_path = '/v1/notifications/safety/stage'
+            event = {'schemaVersion': 1, 'eventId': str(uuid.uuid4()), 'signalRef': str(uuid.uuid4()),
+                     'environment': 'stage', 'mode': 'ACTIVE',
+                     'occurredAt': datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')}
+            for submitter in (a, b):
+                receipt = http(submitter, '/v1/internal/moderation-safety-signals', body=event, status=202,
+                               extra_headers={'X-Grounds-Safety-Producer-Token': safety_token})
+                assert receipt == {'eventId': event['eventId'], 'accepted': True}
+            items = wait_for(lambda: http(b, safety_path, safety_user)['items'], 'private safety delivery')
+            assert len(items) == 1 and items[0]['action'] == {
+                'kind': 'OPEN_SAFETY_SIGNAL', 'environment': 'stage', 'signalRef': event['signalRef']}
+            assert items[0]['priority'] == 'HIGH' and items[0]['type'] == 'MODERATION_SAFETY_SIGNAL'
+            http(a, safety_path + '/' + items[0]['id'] + '/read', safety_user, {}, 204)
+            assert http(b, safety_path + '/unread-count', safety_user) == {'unreadCount': 0}
+            assert http(b, '/v1/notifications', safety_user)['items'] == []
             token = jwt()
             for invalid in (None, jwt(audience='wrong'), jwt(issuer='https://wrong.invalid')):
                 http(a, '/v1/notifications', invalid, status=401)
@@ -327,7 +345,7 @@ def main():
             for name in containers:
                 if name.endswith(('-a', '-b', '-forge')):
                     logs = docker('logs', '--tail', '100', name, check=False)
-                    for secret in (db_password, nats_token, forge_token):
+                    for secret in (db_password, nats_token, forge_token, safety_token):
                         logs = logs.replace(secret, '[redacted]')
                     print(name + '\n' + logs)
             raise
