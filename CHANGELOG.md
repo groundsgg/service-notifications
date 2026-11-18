@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.0](https://github.com/groundsgg/service-notifications/compare/v0.10.0...v0.11.0) (2026-11-18)
+
+
+### Features
+
+* **notifications:** deliver confidential safety signals privately ([#35](https://github.com/groundsgg/service-notifications/issues/35)) ([0e68f56](https://github.com/groundsgg/service-notifications/commit/0e68f56d433e98b5bcec485f4f8a77118fbec2dc))
+
 ## [0.10.0](https://github.com/groundsgg/service-notifications/compare/v0.9.0...v0.10.0) (2026-11-03)
 
 
